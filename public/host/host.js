@@ -73,6 +73,10 @@ class HostScene extends Phaser.Scene {
   }
 
   preload() {
+    this.load.on('loaderror', (fileObj) => {
+      console.warn('[HostScene] Texture load warning:', fileObj && fileObj.key);
+    });
+
     const qrEndpoint = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
     this.load.image('qrcode', qrEndpoint);
 
