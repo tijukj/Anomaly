@@ -19,10 +19,10 @@ export const CONFIG = {
   PHYSICS: {
     MAX_SPEED: 420, // Maximum pixels per second
     ACCELERATION: 1600, // Pixels per second squared
-    FRICTION: 0.85, // Velocity damping factor per tick (0 = full stop, 1 = ice)
+    FRICTION: 0.85, // Velocity damping factor per tick
     PLAYER_RADIUS: 24, // Collision & render radius
-    RIVER_SPEED_MULTIPLIER: 0.55, // Speed multiplier when wading in water without bridge (0.55 = 45% slower)
-    PLAYER_PUSH_FORCE: 0.5 // Soft body-blocking push factor between players (0.0 to 1.0)
+    RIVER_SPEED_MULTIPLIER: 0.55, // Speed multiplier when wading in water without bridge
+    PLAYER_PUSH_FORCE: 0.5 // Soft body-blocking push factor between players
   },
 
   // Player Settings
@@ -34,13 +34,43 @@ export const CONFIG = {
   SPAWN_PLAZA: {
     X: 800,
     Y: 530,
-    RADIUS: 90
+    RADIUS: 85
+  },
+
+  // Scoring Values
+  SCORING: {
+    TREASURE_COMMON: 5,
+    TREASURE_RARE: 15,
+    TREASURE_EPIC: 30,
+    CHEST_MIN: 10,
+    CHEST_MAX: 35,
+    VAULT: 50,
+    DISCOVERY_BONUS: 10,
+    MERCHANT_MIN: 5,
+    MERCHANT_MAX: 25,
+    MERCHANT_COOLDOWN_SEC: 20,
+    PORTAL_COOLDOWN_SEC: 3,
+    CHEST_HOLD_MS: 1000, // 1 second hold to open
+    TREASURE_RESPAWN_MS: 8000 // 8s respawn for collected treasures
+  },
+
+  // Interaction Radii (distance in pixels)
+  INTERACT_RADIUS: {
+    TREASURE: 40,
+    CHEST: 48,
+    VAULT: 54,
+    KEY: 40,
+    SWITCH: 48,
+    PORTAL: 48,
+    MERCHANT: 54
   },
 
   // Seeded POI Counts Per Match
   POI_COUNTS: {
     TREASURES: 12,
+    CHESTS: 4,
     VAULTS: 2,
+    KEYS: 2,
     CLUES: 5,
     MISSIONS: 3,
     PORTAL_PAIRS: 1,

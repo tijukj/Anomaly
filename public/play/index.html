@@ -56,20 +56,36 @@
 
     <!-- View 3: Running Controller Screen -->
     <div id="running-view" class="view running-layout">
-      <!-- Top Status Bar -->
-      <div class="controller-header">
-        <div class="player-pill mini">
-          <div class="player-dot" id="running-player-dot"></div>
-          <div class="player-name-display" id="running-player-name">---</div>
+      <!-- Top HUD Stats: Rank & Score -->
+      <div class="hud-stats-bar">
+        <div class="hud-stat-box rank-box">
+          <span class="hud-label">RANK</span>
+          <span class="hud-value" id="hud-rank">#1</span>
         </div>
-        <div class="sync-badge">● LIVE</div>
+
+        <div class="hud-player-badge">
+          <div class="player-dot mini-dot" id="running-player-dot"></div>
+          <span id="running-player-name">---</span>
+          <span id="hud-key-badge" class="hud-key-badge hidden">🔑</span>
+        </div>
+
+        <div class="hud-stat-box score-box">
+          <span class="hud-label">SCORE</span>
+          <span class="hud-value" id="hud-score">0</span>
+        </div>
+      </div>
+
+      <!-- Single Mission Line -->
+      <div class="mission-bar">
+        <span class="mission-icon">🎯</span>
+        <span class="mission-text" id="hud-mission">RACE FOR TREASURE & DISCOVER REGIONS</span>
       </div>
 
       <!-- Main Game Controller Surface -->
       <div class="control-deck">
         <!-- Left Half: Floating Joystick Touch Zone -->
         <div id="joystick-zone" class="touch-zone left-zone">
-          <div class="zone-hint">TOUCH & DRAG TO MOVE</div>
+          <div class="zone-hint">TOUCH & DRAG TO STEER</div>
           
           <!-- Floating Joystick Element -->
           <div id="joystick-base" class="joystick-base">
@@ -77,10 +93,10 @@
           </div>
         </div>
 
-        <!-- Right Half: Action Button Zone -->
+        <!-- Right Half: Smart Contextual Action Button -->
         <div class="touch-zone right-zone">
-          <button type="button" id="action-btn" class="action-btn">
-            <span class="action-text">ACTION</span>
+          <button type="button" id="action-btn" class="action-btn disabled">
+            <span id="action-text" class="action-text">NO TARGET</span>
             <span class="action-glow-ring"></span>
           </button>
         </div>

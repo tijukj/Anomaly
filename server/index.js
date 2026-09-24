@@ -151,6 +151,10 @@ io.on('connection', (socket) => {
     gameManager.startMatch();
   });
 
+  socket.on('stop_match', () => {
+    gameManager.stopMatch();
+  });
+
   socket.on('disconnect', () => {
     gameManager.handleDisconnect(socket.id);
   });

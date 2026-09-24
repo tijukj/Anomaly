@@ -1,7 +1,9 @@
-// server/game/gameManager.js - Authoritative game physics, collision, map regions & seeded POIs
+// server/game/gameManager.js - Authoritative game physics, collision, map regions, interactables & scoring
 import { CONFIG } from '../config.js';
 import { MAP_REGIONS, RIVER_ZONES, BRIDGES, STATIC_WALLS, SECRET_PASSAGE_WALL, POI_POOLS } from './mapData.js';
 import { createRng } from './seededRng.js';
+import { ScoringSystem } from './scoring.js';
+import { InteractableManager } from './interactables.js';
 import crypto from 'crypto';
 
 export class GameManager {
@@ -14,7 +16,11 @@ export class GameManager {
     this.tickInterval = null;
     this.lastTickComputationMs = 0;
 
-    // Match Seed & Seeded POIs
+    // Subsystems
+    this.scoring = new ScoringSystem(io);
+    this.interactables = new InteractableManager(this, this.scoring);
+
+    // Match Seed & Map state
     this.matchSeed = Math.floor(Math.random() * 900000) + 100000;
     this.seededPois = null;
     this.secretDoorOpen = false;
@@ -27,7 +33,6 @@ export class GameManager {
     this.startTickLoop();
   }
 
-  // Initialize seeded POIs and map state using deterministic PRNG
   initSeededMap() {
     this.matchSeed = Math.floor(Math.random() * 900000) + 100000;
     const rng = createRng(this.matchSeed);
@@ -37,6 +42,7 @@ export class GameManager {
     this.discoveredRegions.clear();
 
     const selectedTreasures = rng.pick(POI_POOLS.treasures, CONFIG.POI_COUNTS.TREASURES);
+    const selectedChests = rng.pick(POI_POOLS.chests, CONFIG.POI_COUNTS.CHESTS);
     const selectedVaults = rng.pick(POI_POOLS.vaults, CONFIG.POI_COUNTS.VAULTS);
     const selectedClues = rng.pick(POI_POOLS.clues, CONFIG.POI_COUNTS.CLUES);
     const selectedMissions = rng.pick(POI_POOLS.missions, CONFIG.POI_COUNTS.MISSIONS);
@@ -47,6 +53,7 @@ export class GameManager {
     this.seededPois = {
       seed: this.matchSeed,
       treasures: selectedTreasures,
+      chests: selectedChests,
       vaults: selectedVaults,
       clues: selectedClues,
       missions: selectedMissions,
@@ -55,6 +62,7 @@ export class GameManager {
       merchants: selectedMerchants
     };
 
+    this.interactables.initForMatch(this.matchSeed, this.seededPois);
     console.log(`[Map] Initialized Seeded Match Layout [Seed: #${this.matchSeed}]`);
   }
 
@@ -67,7 +75,7 @@ export class GameManager {
 
   tick() {
     const startTime = performance.now();
-    const dt = CONFIG.TICK_INTERVAL_MS / 1000; // 0.05s
+    const dt = CONFIG.TICK_INTERVAL_MS / 1000;
 
     if (this.state === CONFIG.STATES.RUNNING) {
       const activePlayerList = Array.from(this.players.values()).filter(p => p.connected);
@@ -88,8 +96,30 @@ export class GameManager {
       // 4. Region Entry & First Discovery tracking
       this.checkRegionDiscoveries(activePlayerList);
 
-      // 5. Broadcast compact 20Hz snapshot
-      this.broadcastSnapshot();
+      // 5. Interactables & Smart Action Button Processing
+      this.interactables.tick(activePlayerList);
+
+      // 6. Compute Live Leaderboard
+      const leaderboard = this.scoring.getLeaderboard(this.players);
+      const rankMap = new Map(leaderboard.map(item => [item.id, item]));
+
+      // 7. Send Contextual HUD to each Phone Player
+      for (const player of activePlayerList) {
+        const socket = this.io.sockets.sockets.get(player.socketId);
+        if (socket) {
+          const rankInfo = rankMap.get(player.id) || { rank: 1, score: player.score || 0 };
+          socket.emit('player_hud', {
+            rank: rankInfo.rank,
+            score: player.score || 0,
+            hasKey: Boolean(player.hasKey),
+            mission: 'RACE FOR TREASURE & DISCOVER REGIONS',
+            actionBtn: player.smartAction || { available: false, label: 'ACTION', color: '#333344', progress: 0 }
+          });
+        }
+      }
+
+      // 8. Broadcast 20Hz Compact Snapshot to Host Screen
+      this.broadcastSnapshot(leaderboard);
     }
 
     this.lastTickComputationMs = performance.now() - startTime;
@@ -100,7 +130,6 @@ export class GameManager {
     const inputY = player.input.y || 0;
     const inputMag = Math.hypot(inputX, inputY);
 
-    // Check if player is wading in water without being on a bridge
     const inRiver = this.isInRiver(player.x, player.y);
     const onBridge = this.isOnBridge(player.x, player.y);
     const speedMult = (inRiver && !onBridge) ? CONFIG.PHYSICS.RIVER_SPEED_MULTIPLIER : 1.0;
@@ -139,12 +168,10 @@ export class GameManager {
     player.y = Math.max(r, Math.min(CONFIG.WORLD.HEIGHT - r, player.y));
   }
 
-  // Circle vs AABB Rectangle Collision with Smooth Normal Sliding
   resolveWallCollisions(player) {
     const r = CONFIG.PHYSICS.PLAYER_RADIUS;
 
     for (const wall of this.activeWalls) {
-      // Find closest point on rectangle to player circle center
       const closestX = Math.max(wall.x, Math.min(player.x, wall.x + wall.width));
       const closestY = Math.max(wall.y, Math.min(player.y, wall.y + wall.height));
 
@@ -153,9 +180,7 @@ export class GameManager {
       const distSq = deltaX * deltaX + deltaY * deltaY;
 
       if (distSq < r * r) {
-        // Overlap detected
         if (distSq < 0.0001) {
-          // Player center is inside rectangle: push out along shallowest axis
           const leftDist = player.x - wall.x;
           const rightDist = (wall.x + wall.width) - player.x;
           const topDist = player.y - wall.y;
@@ -172,11 +197,9 @@ export class GameManager {
           const ny = deltaY / dist;
           const penetration = r - dist;
 
-          // Push player out along contact normal
           player.x += nx * penetration;
           player.y += ny * penetration;
 
-          // Project velocity along wall surface for smooth sliding
           const velAlongNormal = player.vx * nx + player.vy * ny;
           if (velAlongNormal < 0) {
             player.vx -= velAlongNormal * nx;
@@ -187,7 +210,6 @@ export class GameManager {
     }
   }
 
-  // Soft Player-vs-Player Body-Blocking (Pushing)
   resolvePlayerCollisions(playerList) {
     const r = CONFIG.PHYSICS.PLAYER_RADIUS;
     const minDist = r * 2;
@@ -247,7 +269,8 @@ export class GameManager {
               color: player.color.hex,
               timestamp: Date.now()
             });
-            console.log(`[Discovery] 🌟 Racer "${player.name}" was FIRST to discover "${region.name}"!`);
+            // Award Discovery Bonus points!
+            this.scoring.awardPoints(player, CONFIG.SCORING.DISCOVERY_BONUS, `FIRST TO EXPLORE ${region.name}`, { x: player.x, y: player.y });
           }
         }
       }
@@ -289,7 +312,6 @@ export class GameManager {
     return color;
   }
 
-  // Calculate circular spawn positions around the central Start Plaza
   getPlazaSpawnPosition(index, total) {
     const count = Math.max(1, total);
     const angle = (index / count) * Math.PI * 2;
@@ -327,6 +349,8 @@ export class GameManager {
         name: sanitizedName,
         color: color,
         connected: true,
+        score: 0,
+        hasKey: false,
         x: spawn.x,
         y: spawn.y,
         vx: 0,
@@ -375,16 +399,17 @@ export class GameManager {
     if (this.state !== CONFIG.STATES.LOBBY) return false;
     if (activePlayers.length < CONFIG.MIN_PLAYERS_TO_START) return false;
 
-    // Fresh seeded layout for new match
+    // Reset scores & seed for new match
     this.initSeededMap();
 
-    // Spread players around central Start Plaza
     activePlayers.forEach((player, idx) => {
       const spawn = this.getPlazaSpawnPosition(idx, activePlayers.length);
       player.x = spawn.x;
       player.y = spawn.y;
       player.vx = 0;
       player.vy = 0;
+      player.score = 0;
+      player.hasKey = false;
       player.input = { x: 0, y: 0, action: false };
     });
 
@@ -394,6 +419,13 @@ export class GameManager {
     return true;
   }
 
+  stopMatch() {
+    if (this.state === CONFIG.STATES.LOBBY) return;
+    this.state = CONFIG.STATES.LOBBY;
+    console.log('[GameManager] Match stopped -> Returned to Lobby.');
+    this.broadcastFullState();
+  }
+
   getPublicState() {
     const activePlayers = Array.from(this.players.values())
       .filter(p => p.connected)
@@ -401,6 +433,8 @@ export class GameManager {
         id: p.id,
         name: p.name,
         color: p.color,
+        score: p.score || 0,
+        hasKey: Boolean(p.hasKey),
         x: Math.round(p.x * 10) / 10,
         y: Math.round(p.y * 10) / 10
       }));
@@ -428,7 +462,7 @@ export class GameManager {
     this.io.emit('game_state_update', this.getPublicState());
   }
 
-  broadcastSnapshot() {
+  broadcastSnapshot(leaderboard = []) {
     const activePlayers = [];
     for (const p of this.players.values()) {
       if (p.connected) {
@@ -436,6 +470,8 @@ export class GameManager {
           id: p.id,
           x: Math.round(p.x * 10) / 10,
           y: Math.round(p.y * 10) / 10,
+          s: p.score || 0,
+          k: p.hasKey ? 1 : 0,
           a: p.input.action ? 1 : 0
         });
       }
@@ -444,7 +480,10 @@ export class GameManager {
     const snapshot = {
       t: Date.now(),
       tickTime: Math.round(this.lastTickComputationMs * 100) / 100,
-      p: activePlayers
+      p: activePlayers,
+      ent: this.interactables.getVisibleEntities(),
+      lb: leaderboard.slice(0, 5),
+      doorOpen: this.secretDoorOpen
     };
 
     this.io.emit('tick_snapshot', snapshot);

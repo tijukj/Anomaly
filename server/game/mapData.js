@@ -1,4 +1,4 @@
-// server/game/mapData.js - Static map topology, regions, walls, and seeded candidate pools
+// server/game/mapData.js - Static map topology, regions, walls, and candidate POI pools
 
 export const MAP_REGIONS = [
   {
@@ -7,7 +7,7 @@ export const MAP_REGIONS = [
     colorHex: '#00FF66',
     colorNum: 0x00ff66,
     bounds: { x: 40, y: 40, width: 480, height: 920 },
-    labelPos: { x: 280, y: 100 }
+    labelPos: { x: 280, y: 80 }
   },
   {
     id: 'ruins',
@@ -15,7 +15,7 @@ export const MAP_REGIONS = [
     colorHex: '#FF9900',
     colorNum: 0xff9900,
     bounds: { x: 560, y: 40, width: 480, height: 400 },
-    labelPos: { x: 800, y: 90 }
+    labelPos: { x: 800, y: 75 }
   },
   {
     id: 'castle',
@@ -23,7 +23,7 @@ export const MAP_REGIONS = [
     colorHex: '#3377FF',
     colorNum: 0x3377ff,
     bounds: { x: 1080, y: 40, width: 480, height: 420 },
-    labelPos: { x: 1320, y: 90 }
+    labelPos: { x: 1320, y: 75 }
   },
   {
     id: 'river',
@@ -31,7 +31,7 @@ export const MAP_REGIONS = [
     colorHex: '#00CCFF',
     colorNum: 0x00ccff,
     bounds: { x: 40, y: 470, width: 1520, height: 120 },
-    labelPos: { x: 180, y: 530 }
+    labelPos: { x: 190, y: 530 }
   },
   {
     id: 'cave',
@@ -47,23 +47,23 @@ export const MAP_REGIONS = [
     colorHex: '#00F0FF',
     colorNum: 0x00f0ff,
     bounds: { x: 680, y: 460, width: 240, height: 140 },
-    labelPos: { x: 800, y: 490 }
+    labelPos: { x: 800, y: 640 }
   }
 ];
 
 // River Water Slowdown Zones (Rectangles)
 export const RIVER_ZONES = [
-  { x: 40, y: 480, width: 340, height: 100 },
-  { x: 460, y: 480, width: 280, height: 100 },
-  { x: 860, y: 480, width: 360, height: 100 },
-  { x: 1300, y: 480, width: 260, height: 100 }
+  { x: 40, y: 470, width: 340, height: 120 },
+  { x: 460, y: 470, width: 280, height: 120 },
+  { x: 860, y: 470, width: 360, height: 120 },
+  { x: 1300, y: 470, width: 260, height: 120 }
 ];
 
 // 3 Safe Bridges crossing the river (Exempt from water speed penalty)
 export const BRIDGES = [
-  { id: 'bridge_west', name: 'West Bridge', x: 380, y: 465, width: 80, height: 130, colorNum: 0x00f0ff },
-  { id: 'bridge_center', name: 'Plaza Bridge', x: 740, y: 465, width: 120, height: 130, colorNum: 0x39ff14 },
-  { id: 'bridge_east', name: 'East Bridge', x: 1220, y: 465, width: 80, height: 130, colorNum: 0x00f0ff }
+  { id: 'bridge_west', name: 'West Bridge', x: 380, y: 460, width: 80, height: 140, colorNum: 0x00f0ff },
+  { id: 'bridge_center', name: 'Plaza Bridge', x: 740, y: 460, width: 120, height: 140, colorNum: 0x39ff14 },
+  { id: 'bridge_east', name: 'East Bridge', x: 1220, y: 460, width: 80, height: 140, colorNum: 0x00f0ff }
 ];
 
 // Static Walls & Obstacles (AABB collision rectangles)
@@ -93,9 +93,7 @@ export const STATIC_WALLS = [
   { x: 740, y: 320, width: 90, height: 30, type: 'ruins', colorNum: 0xcc7700 },
 
   // --- CITADEL CASTLE (Fortress Walls with 2 Gates) ---
-  // North wall
   { x: 1120, y: 80, width: 400, height: 24, type: 'castle', colorNum: 0x3366cc },
-  // East wall
   { x: 1496, y: 80, width: 24, height: 340, type: 'castle', colorNum: 0x3366cc },
   // South wall with South Gate gap (Gate at x: 1280-1360)
   { x: 1120, y: 400, width: 160, height: 24, type: 'castle', colorNum: 0x3366cc },
@@ -120,7 +118,7 @@ export const STATIC_WALLS = [
   { x: 720, y: 800, width: 160, height: 28, type: 'plaza', colorNum: 0x0099cc }
 ];
 
-// Secret Passage Wall (Blocks passage until secret switch is triggered)
+// Secret Passage Wall (Opens when secret switch is activated)
 export const SECRET_PASSAGE_WALL = {
   id: 'secret_door',
   x: 1496,
@@ -134,32 +132,43 @@ export const SECRET_PASSAGE_WALL = {
 // Candidate POI Pools for Seeded Match Placement
 export const POI_POOLS = {
   treasures: [
-    { id: 't1', region: 'forest', x: 190, y: 270 },
-    { id: 't2', region: 'forest', x: 260, y: 150 },
-    { id: 't3', region: 'forest', x: 100, y: 470 },
-    { id: 't4', region: 'forest', x: 380, y: 350 },
-    { id: 't5', region: 'forest', x: 180, y: 720 },
-    { id: 't6', region: 'forest', x: 340, y: 900 },
-    { id: 't7', region: 'ruins', x: 650, y: 200 },
-    { id: 't8', region: 'ruins', x: 890, y: 200 },
-    { id: 't9', region: 'ruins', x: 790, y: 280 },
-    { id: 't10', region: 'ruins', x: 920, y: 380 },
-    { id: 't11', region: 'castle', x: 1180, y: 140 },
-    { id: 't12', region: 'castle', x: 1440, y: 140 },
-    { id: 't13', region: 'castle', x: 1310, y: 230 },
-    { id: 't14', region: 'castle', x: 1440, y: 350 },
-    { id: 't15', region: 'cave', x: 1200, y: 700 },
-    { id: 't16', region: 'cave', x: 1340, y: 690 },
-    { id: 't17', region: 'cave', x: 1280, y: 800 },
-    { id: 't18', region: 'cave', x: 1470, y: 880 },
-    { id: 't19', region: 'plaza', x: 790, y: 740 },
-    { id: 't20', region: 'plaza', x: 670, y: 860 }
+    { id: 't1', region: 'forest', x: 190, y: 270, tier: 'common' },
+    { id: 't2', region: 'forest', x: 260, y: 150, tier: 'common' },
+    { id: 't3', region: 'forest', x: 100, y: 470, tier: 'rare' },
+    { id: 't4', region: 'forest', x: 380, y: 350, tier: 'common' },
+    { id: 't5', region: 'forest', x: 180, y: 720, tier: 'rare' },
+    { id: 't6', region: 'forest', x: 340, y: 900, tier: 'epic' },
+    { id: 't7', region: 'ruins', x: 650, y: 200, tier: 'common' },
+    { id: 't8', region: 'ruins', x: 890, y: 200, tier: 'rare' },
+    { id: 't9', region: 'ruins', x: 790, y: 280, tier: 'common' },
+    { id: 't10', region: 'ruins', x: 920, y: 380, tier: 'rare' },
+    { id: 't11', region: 'castle', x: 1180, y: 140, tier: 'rare' },
+    { id: 't12', region: 'castle', x: 1440, y: 140, tier: 'epic' },
+    { id: 't13', region: 'castle', x: 1310, y: 230, tier: 'epic' },
+    { id: 't14', region: 'castle', x: 1440, y: 350, tier: 'rare' },
+    { id: 't15', region: 'cave', x: 1200, y: 700, tier: 'rare' },
+    { id: 't16', region: 'cave', x: 1340, y: 690, tier: 'rare' },
+    { id: 't17', region: 'cave', x: 1280, y: 800, tier: 'epic' },
+    { id: 't18', region: 'cave', x: 1470, y: 880, tier: 'epic' },
+    { id: 't19', region: 'plaza', x: 790, y: 740, tier: 'common' },
+    { id: 't20', region: 'plaza', x: 670, y: 860, tier: 'common' }
+  ],
+  chests: [
+    { id: 'ch1', region: 'forest', x: 440, y: 290 },
+    { id: 'ch2', region: 'ruins', x: 790, y: 360 },
+    { id: 'ch3', region: 'castle', x: 1210, y: 230 },
+    { id: 'ch4', region: 'cave', x: 1330, y: 790 },
+    { id: 'ch5', region: 'plaza', x: 890, y: 740 }
   ],
   vaults: [
     { id: 'v1', region: 'ruins', x: 790, y: 180, name: 'Sunken Vault' },
     { id: 'v2', region: 'castle', x: 1310, y: 340, name: 'Citadel Vault' },
-    { id: 'v3', region: 'cave', x: 1460, y: 800, name: 'Obsidian Vault' },
-    { id: 'v4', region: 'forest', x: 240, y: 870, name: 'Canopy Vault' }
+    { id: 'v3', region: 'cave', x: 1460, y: 800, name: 'Obsidian Vault' }
+  ],
+  keys: [
+    { id: 'k1', region: 'forest', x: 280, y: 860 },
+    { id: 'k2', region: 'ruins', x: 630, y: 160 },
+    { id: 'k3', region: 'cave', x: 1150, y: 710 }
   ],
   clues: [
     { id: 'c1', region: 'forest', x: 300, y: 310 },
@@ -167,14 +176,13 @@ export const POI_POOLS = {
     { id: 'c3', region: 'ruins', x: 710, y: 270 },
     { id: 'c4', region: 'ruins', x: 870, y: 270 },
     { id: 'c5', region: 'castle', x: 1200, y: 330 },
-    { id: 'c6', region: 'cave', x: 1190, y: 780 },
-    { id: 'c7', region: 'cave', x: 1430, y: 680 }
+    { id: 'c6', region: 'cave', x: 1190, y: 780 }
   ],
   missions: [
-    { id: 'm1', region: 'forest', x: 390, y: 180, label: 'Grove Trial' },
-    { id: 'm2', region: 'ruins', x: 800, y: 380, label: 'Ruin Altar' },
-    { id: 'm3', region: 'castle', x: 1420, y: 230, label: 'Throne Trial' },
-    { id: 'm4', region: 'cave', x: 1310, y: 880, label: 'Abyss Echo' }
+    { id: 'm1', region: 'forest', label: 'Explore the Neon Forest' },
+    { id: 'm2', region: 'ruins', label: 'Uncover the Ancient Ruins' },
+    { id: 'm3', region: 'castle', label: 'Infiltrate Citadel Castle' },
+    { id: 'm4', region: 'cave', label: 'Survive the Obsidian Cave' }
   ],
   secretSwitches: [
     { id: 'sw1', region: 'cave', x: 1150, y: 890, target: 'secret_door' },
@@ -194,7 +202,7 @@ export const POI_POOLS = {
     }
   ],
   merchants: [
-    { id: 'merc_1', region: 'plaza', x: 740, y: 640, name: 'CYBER-MERCHANT 1' },
+    { id: 'merc_1', region: 'plaza', x: 740, y: 640, name: 'CYBER-MERCHANT' },
     { id: 'merc_2', region: 'forest', x: 430, y: 410, name: 'FOREST-BROKER' },
     { id: 'merc_3', region: 'castle', x: 1180, y: 380, name: 'CITADEL-ARMS' }
   ]

@@ -1,4 +1,4 @@
-// public/host/host.js - Big Screen Phaser 3 Host Arena & Lobby
+// public/host/host.js - Big Screen Phaser 3 Host Arena, Interactables & Leaderboard
 const socket = io({
   transports: ['websocket', 'polling']
 });
@@ -22,7 +22,7 @@ let currentGameState = {
   map: null
 };
 
-// Snapshot interpolation & debug state
+// Snapshot interpolation & UI state
 let latestSnapshot = null;
 let lastSnapshotTime = 0;
 let snapshotBytes = 0;
@@ -52,6 +52,8 @@ class HostScene extends Phaser.Scene {
   constructor() {
     super({ key: 'HostScene' });
     this.playerMap = new Map();
+    this.interactableObjects = new Map();
+    this.leaderboardContainer = null;
     this.debugContainer = null;
     this.poiDebugContainer = null;
   }
@@ -68,7 +70,10 @@ class HostScene extends Phaser.Scene {
     this.bgGraphics = this.add.graphics();
     this.mapGraphics = this.add.graphics();
     this.wallsGraphics = this.add.graphics();
+    this.interactablesGraphics = this.add.graphics();
     this.labelsContainer = this.add.container(0, 0);
+    this.fxContainer = this.add.container(0, 0);
+    this.leaderboardContainer = this.add.container(0, 0);
     this.poiDebugContainer = this.add.container(0, 0);
     this.lobbyContainer = this.add.container(0, 0);
     this.arenaContainer = this.add.container(0, 0);
@@ -93,13 +98,16 @@ class HostScene extends Phaser.Scene {
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.spaceKey.on('down', () => this.triggerStartMatch());
 
+    // ESC to Stop Match & Exit to Lobby
+    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.escKey.on('down', () => this.triggerStopMatch());
+
     this.dKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.dKey.on('down', () => {
       showDebugOverlay = !showDebugOverlay;
       this.debugContainer.setVisible(showDebugOverlay);
     });
 
-    // Toggle Seeded POI Markers with 'M'
     this.mKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     this.mKey.on('down', () => {
       showPoiDebugMarkers = !showPoiDebugMarkers;
@@ -118,6 +126,13 @@ class HostScene extends Phaser.Scene {
       if (state.state === 'RUNNING') {
         this.drawFullMap();
         this.renderPoiMarkers();
+      }
+    });
+
+    // Socket Event: Floating score effect & glow burst
+    socket.on('score_popup', (event) => {
+      if (currentGameState.state === 'RUNNING') {
+        this.spawnScorePopup(event);
       }
     });
 
@@ -146,6 +161,12 @@ class HostScene extends Phaser.Scene {
     }
   }
 
+  triggerStopMatch() {
+    if (currentGameState.state === 'RUNNING') {
+      socket.emit('stop_match');
+    }
+  }
+
   onStateChanged(newState) {
     if (newState === 'RUNNING') {
       this.lobbyContainer.setVisible(false);
@@ -158,7 +179,9 @@ class HostScene extends Phaser.Scene {
       this.clearAllPlayerEntities();
       this.mapGraphics.clear();
       this.wallsGraphics.clear();
+      this.interactablesGraphics.clear();
       this.labelsContainer.removeAll(true);
+      this.leaderboardContainer.removeAll(true);
       this.poiDebugContainer.removeAll(true);
       this.renderLobbyUI();
     }
@@ -179,7 +202,6 @@ class HostScene extends Phaser.Scene {
     }
   }
 
-  // Draw complete neon top-down map: regions, river, bridges, and walls
   drawFullMap() {
     this.mapGraphics.clear();
     this.wallsGraphics.clear();
@@ -191,36 +213,34 @@ class HostScene extends Phaser.Scene {
     // 1. Draw Region Zone Backgrounds & Neon Outlines
     for (const region of mapData.regions) {
       const b = region.bounds;
-      // Semi-transparent ambient tinted fill
       this.mapGraphics.fillStyle(region.colorNum, 0.05);
       this.mapGraphics.fillRect(b.x, b.y, b.width, b.height);
 
-      // Glowing Region Boundary Box
-      this.mapGraphics.lineStyle(2, region.colorNum, 0.4);
+      this.mapGraphics.lineStyle(2, region.colorNum, 0.35);
       this.mapGraphics.strokeRect(b.x, b.y, b.width, b.height);
 
-      // Floating Region Name Label
-      if (region.id !== 'plaza') {
+      // Clean non-overlapping region titles
+      if (region.id !== 'plaza' && region.id !== 'river') {
         const label = this.add.text(region.labelPos.x, region.labelPos.y, region.name, {
           fontFamily: '"Impact", "Arial Black", sans-serif',
-          fontSize: '22px',
+          fontSize: '20px',
           color: region.colorHex,
-          letterSpacing: 4
-        }).setOrigin(0.5).setAlpha(0.75);
+          letterSpacing: 3
+        }).setOrigin(0.5).setAlpha(0.7);
         this.labelsContainer.add(label);
       }
     }
 
     // 2. Draw River (Water Band)
-    this.mapGraphics.fillStyle(0x0088cc, 0.22);
+    this.mapGraphics.fillStyle(0x0088cc, 0.2);
     this.mapGraphics.fillRect(40, 470, 1520, 120);
 
     this.mapGraphics.lineStyle(2, 0x00ccff, 0.7);
     this.mapGraphics.lineBetween(40, 470, 1560, 470);
     this.mapGraphics.lineBetween(40, 590, 1560, 590);
 
-    // River Floating Label
-    const riverLabel = this.add.text(220, 530, '🌊 CYBER RIVER (SLOW)', {
+    // River label in open left area
+    const riverLabel = this.add.text(200, 530, '🌊 CYBER RIVER', {
       fontFamily: 'sans-serif',
       fontSize: '13px',
       fontStyle: 'bold',
@@ -231,39 +251,36 @@ class HostScene extends Phaser.Scene {
 
     // 3. Draw 3 Bridges Crossing River
     for (const bridge of mapData.bridges) {
-      // Bridge Deck Fill
       this.mapGraphics.fillStyle(0x161633, 0.95);
       this.mapGraphics.fillRoundedRect(bridge.x, bridge.y, bridge.width, bridge.height, 6);
 
-      // Bridge Glowing Rails
       this.mapGraphics.lineStyle(3, bridge.colorNum, 0.9);
       this.mapGraphics.strokeRoundedRect(bridge.x, bridge.y, bridge.width, bridge.height, 6);
 
-      // Bridge Plank Lines
-      this.mapGraphics.lineStyle(1, 0xffffff, 0.3);
+      this.mapGraphics.lineStyle(1, 0xffffff, 0.25);
       for (let py = bridge.y + 16; py < bridge.y + bridge.height - 10; py += 18) {
         this.mapGraphics.lineBetween(bridge.x + 4, py, bridge.x + bridge.width - 4, py);
       }
 
-      const bridgeText = this.add.text(bridge.x + bridge.width / 2, bridge.y + bridge.height / 2, 'BRIDGE', {
+      const bridgeText = this.add.text(bridge.x + bridge.width / 2, bridge.y + 18, 'BRIDGE', {
         fontFamily: 'monospace',
-        fontSize: '10px',
+        fontSize: '9px',
         fontStyle: 'bold',
         color: '#FFFFFF'
       }).setOrigin(0.5);
       this.labelsContainer.add(bridgeText);
     }
 
-    // 4. Draw Start Plaza Center Circle & Rings
+    // 4. Draw Start Plaza Center Circle (Label cleanly below)
     this.mapGraphics.lineStyle(2, 0x00F0FF, 0.6);
-    this.mapGraphics.strokeCircle(800, 530, 90);
-    this.mapGraphics.strokeCircle(800, 530, 24);
+    this.mapGraphics.strokeCircle(800, 530, 85);
+    this.mapGraphics.strokeCircle(800, 530, 20);
     this.mapGraphics.fillStyle(0x00F0FF, 0.08);
-    this.mapGraphics.fillCircle(800, 530, 90);
+    this.mapGraphics.fillCircle(800, 530, 85);
 
-    const plazaLabel = this.add.text(800, 530, 'START PLAZA', {
+    const plazaLabel = this.add.text(800, 630, 'START PLAZA', {
       fontFamily: 'sans-serif',
-      fontSize: '12px',
+      fontSize: '11px',
       fontStyle: 'bold',
       color: '#00F0FF',
       letterSpacing: 2
@@ -299,7 +316,6 @@ class HostScene extends Phaser.Scene {
           this.wallsGraphics.strokeRect(wall.x, wall.y, wall.width, wall.height);
         }
       } else {
-        // Ruins / Other
         this.wallsGraphics.fillStyle(0x1e1528, 0.9);
         this.wallsGraphics.fillRoundedRect(wall.x, wall.y, wall.width, wall.height, 4);
         this.wallsGraphics.lineStyle(2, color, 0.8);
@@ -307,8 +323,28 @@ class HostScene extends Phaser.Scene {
       }
     }
 
-    // 6. Match Seed Badge (Bottom Right)
-    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `MATCH SEED: #${currentGameState.seed || '000000'} | [M] POI Markers`, {
+    // 6. Top Left ESC Exit Button
+    const exitBtn = this.add.graphics();
+    exitBtn.fillStyle(0x1a1a2e, 0.8);
+    exitBtn.fillRoundedRect(30, 30, 160, 34, 6);
+    exitBtn.lineStyle(1.5, 0xFF0055, 0.8);
+    exitBtn.strokeRoundedRect(30, 30, 160, 34, 6);
+    this.labelsContainer.add(exitBtn);
+
+    const exitText = this.add.text(110, 47, 'ESC : EXIT TO LOBBY', {
+      fontFamily: 'sans-serif',
+      fontSize: '11px',
+      fontStyle: 'bold',
+      color: '#FF0055'
+    }).setOrigin(0.5);
+    this.labelsContainer.add(exitText);
+
+    const exitZone = this.add.zone(110, 47, 160, 34).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    exitZone.on('pointerdown', () => this.triggerStopMatch());
+    this.labelsContainer.add(exitZone);
+
+    // 7. Match Seed Badge (Bottom Right)
+    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `SEED: #${currentGameState.seed || '000000'} | [M] POI Markers | [ESC] Exit`, {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#00F0FF'
@@ -316,7 +352,158 @@ class HostScene extends Phaser.Scene {
     this.labelsContainer.add(seedText);
   }
 
-  // Render Seeded Match POI Debug Markers (Toggleable with 'M')
+  // Draw Live Interactables on Arena
+  drawActiveInteractables(entities) {
+    this.interactablesGraphics.clear();
+    if (!entities) return;
+
+    for (const ent of entities) {
+      if (ent.state !== 'active') continue;
+
+      if (ent.type === 'treasure') {
+        // Glowing animated gem
+        this.interactablesGraphics.fillStyle(ent.colorNum, 0.9);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 9);
+        this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
+        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 9);
+        this.interactablesGraphics.fillStyle(0xFFFFFF, 0.9);
+        this.interactablesGraphics.fillCircle(ent.x - 2, ent.y - 2, 2.5);
+      } else if (ent.type === 'chest') {
+        // Amber treasure chest
+        this.interactablesGraphics.fillStyle(0xFFAA00, 0.95);
+        this.interactablesGraphics.fillRoundedRect(ent.x - 14, ent.y - 12, 28, 24, 4);
+        this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
+        this.interactablesGraphics.strokeRoundedRect(ent.x - 14, ent.y - 12, 28, 24, 4);
+      } else if (ent.type === 'vault') {
+        // Bronze Vault Monolith
+        this.interactablesGraphics.fillStyle(0xFF8800, 0.9);
+        this.interactablesGraphics.fillRoundedRect(ent.x - 18, ent.y - 18, 36, 36, 6);
+        this.interactablesGraphics.lineStyle(2.5, 0xFFFFFF, 1);
+        this.interactablesGraphics.strokeRoundedRect(ent.x - 18, ent.y - 18, 36, 36, 6);
+        this.interactablesGraphics.fillStyle(0x050510, 1);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 6);
+      } else if (ent.type === 'key') {
+        // Floating Golden Key
+        this.interactablesGraphics.fillStyle(0xFFDD00, 1);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 7);
+        this.interactablesGraphics.fillRect(ent.x, ent.y - 2, 10, 4);
+        this.interactablesGraphics.lineStyle(1.5, 0xFFFFFF, 1);
+        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 7);
+      } else if (ent.type === 'portal') {
+        // Swirling Portal Ring
+        this.interactablesGraphics.lineStyle(3, 0x00F0FF, 0.85);
+        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 16);
+        this.interactablesGraphics.fillStyle(0x00F0FF, 0.25);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 16);
+      } else if (ent.type === 'merchant') {
+        // Merchant Kiosk
+        this.interactablesGraphics.fillStyle(0x39FF14, 0.9);
+        this.interactablesGraphics.fillRoundedRect(ent.x - 16, ent.y - 16, 32, 32, 6);
+        this.interactablesGraphics.lineStyle(2, 0x050510, 1);
+        this.interactablesGraphics.strokeRoundedRect(ent.x - 16, ent.y - 16, 32, 32, 6);
+      } else if (ent.type === 'switch') {
+        // Red Switch Pad
+        this.interactablesGraphics.fillStyle(0xFF0055, 0.9);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 12);
+        this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
+        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 12);
+      }
+    }
+  }
+
+  // Draw Top 5 Leaderboard on Right Side of Arena
+  drawHostLeaderboard(leaderboard = []) {
+    this.leaderboardContainer.removeAll(true);
+    if (currentGameState.state !== 'RUNNING') return;
+
+    const startX = WORLD_WIDTH - 210;
+    const startY = 30;
+    const width = 180;
+
+    // Leaderboard Header Box
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0a0a1e, 0.85);
+    bg.fillRoundedRect(startX - 10, startY, width + 20, 36 + leaderboard.length * 40, 10);
+    bg.lineStyle(1.5, 0x00F0FF, 0.7);
+    bg.strokeRoundedRect(startX - 10, startY, width + 20, 36 + leaderboard.length * 40, 10);
+    this.leaderboardContainer.add(bg);
+
+    const title = this.add.text(startX + width / 2, startY + 18, '👑 LEADERBOARD', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '14px',
+      color: '#00F0FF',
+      letterSpacing: 2
+    }).setOrigin(0.5);
+    this.leaderboardContainer.add(title);
+
+    leaderboard.forEach((player, idx) => {
+      const itemY = startY + 44 + idx * 38;
+      const rankColor = idx === 0 ? '#FFE600' : (idx === 1 ? '#CCCCCC' : (idx === 2 ? '#CD7F32' : '#FFFFFF'));
+
+      // Player color pip
+      const pip = this.add.graphics();
+      pip.fillStyle(player.color.num, 1);
+      pip.fillCircle(startX + 8, itemY + 8, 6);
+      this.leaderboardContainer.add(pip);
+
+      // Rank & Name
+      const nameText = this.add.text(startX + 22, itemY + 8, `${idx + 1}. ${player.name}`, {
+        fontFamily: 'sans-serif',
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: rankColor
+      }).setOrigin(0, 0.5);
+
+      // Score
+      const scoreText = this.add.text(startX + width - 4, itemY + 8, `${player.score}`, {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        fontStyle: 'bold',
+        color: '#39FF14'
+      }).setOrigin(1, 0.5);
+
+      this.leaderboardContainer.add([nameText, scoreText]);
+    });
+  }
+
+  // Floating score popup and burst animation on host
+  spawnScorePopup(event) {
+    // 1. Glow burst circle
+    const burst = this.add.graphics();
+    burst.lineStyle(3, event.colorNum || 0x39ff14, 0.9);
+    burst.strokeCircle(event.x, event.y, 10);
+    this.fxContainer.add(burst);
+
+    this.tweens.add({
+      targets: burst,
+      scaleX: 3.5,
+      scaleY: 3.5,
+      alpha: 0,
+      duration: 600,
+      ease: 'Power2',
+      onComplete: () => burst.destroy()
+    });
+
+    // 2. Floating +Points Text
+    const popupText = this.add.text(event.x, event.y - 10, `+${event.amount}`, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '22px',
+      color: '#39FF14',
+      stroke: '#000000',
+      strokeThickness: 3
+    }).setOrigin(0.5);
+    this.fxContainer.add(popupText);
+
+    this.tweens.add({
+      targets: popupText,
+      y: event.y - 55,
+      alpha: 0,
+      duration: 1100,
+      ease: 'Cubic.easeOut',
+      onComplete: () => popupText.destroy()
+    });
+  }
+
   renderPoiMarkers() {
     this.poiDebugContainer.removeAll(true);
     const mapData = currentGameState.map;
@@ -325,118 +512,21 @@ class HostScene extends Phaser.Scene {
     const pois = mapData.pois;
     const g = this.add.graphics();
 
-    // 1. Treasures (Gold Diamonds)
     for (const t of (pois.treasures || [])) {
       g.fillStyle(0xFFD700, 0.9);
       g.fillCircle(t.x, t.y, 8);
       g.lineStyle(1.5, 0xFFFFFF, 1);
       g.strokeCircle(t.x, t.y, 8);
-
-      const label = this.add.text(t.x, t.y, 'T', {
-        fontFamily: 'sans-serif',
-        fontSize: '9px',
-        fontStyle: 'bold',
-        color: '#000000'
-      }).setOrigin(0.5);
+      const label = this.add.text(t.x, t.y, 'T', { fontFamily: 'sans-serif', fontSize: '9px', fontStyle: 'bold', color: '#000000' }).setOrigin(0.5);
       this.poiDebugContainer.add(label);
     }
 
-    // 2. Vaults (Bronze Squares)
     for (const v of (pois.vaults || [])) {
       g.fillStyle(0xFF8800, 0.95);
       g.fillRect(v.x - 14, v.y - 14, 28, 28);
       g.lineStyle(2, 0xFFFFFF, 1);
       g.strokeRect(v.x - 14, v.y - 14, 28, 28);
-
-      const label = this.add.text(v.x, v.y, 'VAULT', {
-        fontFamily: 'monospace',
-        fontSize: '7px',
-        fontStyle: 'bold',
-        color: '#FFFFFF'
-      }).setOrigin(0.5);
-      this.poiDebugContainer.add(label);
-    }
-
-    // 3. Clues (Cyan Rings)
-    for (const c of (pois.clues || [])) {
-      g.lineStyle(2, 0x00FFFF, 0.9);
-      g.strokeCircle(c.x, c.y, 10);
-      g.fillStyle(0x00FFFF, 0.5);
-      g.fillCircle(c.x, c.y, 5);
-
-      const label = this.add.text(c.x, c.y - 16, 'CLUE', {
-        fontFamily: 'sans-serif',
-        fontSize: '8px',
-        fontStyle: 'bold',
-        color: '#00FFFF'
-      }).setOrigin(0.5);
-      this.poiDebugContainer.add(label);
-    }
-
-    // 4. Mission Zones (Neon Orange Circles)
-    for (const m of (pois.missions || [])) {
-      g.lineStyle(2, 0xFF5500, 0.8);
-      g.strokeCircle(m.x, m.y, 28);
-      g.fillStyle(0xFF5500, 0.15);
-      g.fillCircle(m.x, m.y, 28);
-
-      const label = this.add.text(m.x, m.y, m.label || 'MISSION', {
-        fontFamily: 'sans-serif',
-        fontSize: '8px',
-        fontStyle: 'bold',
-        color: '#FF5500'
-      }).setOrigin(0.5);
-      this.poiDebugContainer.add(label);
-    }
-
-    // 5. Secret Switch (Red Button Marker)
-    if (pois.secretSwitch) {
-      const sw = pois.secretSwitch;
-      g.fillStyle(0xFF0055, 1);
-      g.fillCircle(sw.x, sw.y, 10);
-      g.lineStyle(2, 0xFFFFFF, 1);
-      g.strokeCircle(sw.x, sw.y, 10);
-
-      const label = this.add.text(sw.x, sw.y - 16, 'SWITCH', {
-        fontFamily: 'monospace',
-        fontSize: '8px',
-        fontStyle: 'bold',
-        color: '#FF0055'
-      }).setOrigin(0.5);
-      this.poiDebugContainer.add(label);
-    }
-
-    // 6. Portals (Swirling Rings)
-    for (const pair of (pois.portals || [])) {
-      [pair.a, pair.b].forEach((portal, idx) => {
-        g.lineStyle(3, portal.colorNum || 0x00F0FF, 0.9);
-        g.strokeCircle(portal.x, portal.y, 14);
-        g.fillStyle(portal.colorNum || 0x00F0FF, 0.3);
-        g.fillCircle(portal.x, portal.y, 8);
-
-        const label = this.add.text(portal.x, portal.y - 18, `PORTAL ${idx === 0 ? 'A' : 'B'}`, {
-          fontFamily: 'sans-serif',
-          fontSize: '8px',
-          fontStyle: 'bold',
-          color: '#00F0FF'
-        }).setOrigin(0.5);
-        this.poiDebugContainer.add(label);
-      });
-    }
-
-    // 7. Merchants (Green Kiosks)
-    for (const merc of (pois.merchants || [])) {
-      g.fillStyle(0x39FF14, 0.9);
-      g.fillRoundedRect(merc.x - 12, merc.y - 12, 24, 24, 4);
-      g.lineStyle(2, 0x050510, 1);
-      g.strokeRoundedRect(merc.x - 12, merc.y - 12, 24, 24, 4);
-
-      const label = this.add.text(merc.x, merc.y - 16, merc.name, {
-        fontFamily: 'sans-serif',
-        fontSize: '8px',
-        fontStyle: 'bold',
-        color: '#39FF14'
-      }).setOrigin(0.5);
+      const label = this.add.text(v.x, v.y, 'VAULT', { fontFamily: 'monospace', fontSize: '7px', fontStyle: 'bold', color: '#FFFFFF' }).setOrigin(0.5);
       this.poiDebugContainer.add(label);
     }
 
@@ -451,7 +541,6 @@ class HostScene extends Phaser.Scene {
     const w = WORLD_WIDTH;
     const h = WORLD_HEIGHT;
 
-    // 1. Title Header
     const title = this.add.text(w / 2, 65, 'A N O M A L Y', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '64px',
@@ -468,7 +557,6 @@ class HostScene extends Phaser.Scene {
 
     this.lobbyContainer.add([title, subtitle]);
 
-    // 2. Left Panel: QR Code & Join Box
     const leftX = w * 0.28;
     const leftY = 515;
     const boxW = 460;
@@ -490,7 +578,6 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.lobbyContainer.add(scanHeader);
 
-    // High Contrast White Plate
     const qrPlate = this.add.graphics();
     qrPlate.fillStyle(0xFFFFFF, 1);
     qrPlate.fillRoundedRect(leftX - 125, leftY - 170, 250, 250, 12);
@@ -518,7 +605,6 @@ class HostScene extends Phaser.Scene {
 
     this.lobbyContainer.add([orLabel, urlDisplay]);
 
-    // 3. Right Panel: Player Roster
     const rightX = w * 0.72;
     const rightY = 270;
     const rightW = 560;
@@ -584,7 +670,6 @@ class HostScene extends Phaser.Scene {
       });
     }
 
-    // 4. Bottom Start Button
     const btnY = h - 90;
     const btnW = 340;
     const btnH = 64;
@@ -663,6 +748,8 @@ class HostScene extends Phaser.Scene {
     core.fillStyle(0xFFFFFF, 0.9);
     core.fillCircle(0, 0, 6);
 
+    const keyIcon = this.add.text(0, -radius - 30, '🔑', { fontSize: '14px' }).setOrigin(0.5).setVisible(false);
+
     const nameTag = this.add.text(0, -radius - 14, p.name, {
       fontFamily: 'sans-serif',
       fontSize: '14px',
@@ -672,7 +759,7 @@ class HostScene extends Phaser.Scene {
       padding: { x: 6, y: 2 }
     }).setOrigin(0.5);
 
-    container.add([glow, ring, circle, core, nameTag]);
+    container.add([glow, ring, circle, core, keyIcon, nameTag]);
     container.setDepth(10);
 
     this.playerMap.set(p.id, {
@@ -680,11 +767,14 @@ class HostScene extends Phaser.Scene {
       circle,
       glow,
       ring,
+      keyIcon,
       labelText: nameTag,
       targetX: p.x || 800,
       targetY: p.y || 530,
       currentX: p.x || 800,
       currentY: p.y || 530,
+      score: 0,
+      hasKey: false,
       action: false,
       color: p.color
     });
@@ -698,15 +788,30 @@ class HostScene extends Phaser.Scene {
   }
 
   applySnapshot(snapshot) {
-    if (!snapshot || !snapshot.p) return;
+    if (!snapshot) return;
 
-    for (const snap of snapshot.p) {
-      const entity = this.playerMap.get(snap.id);
-      if (entity) {
-        entity.targetX = snap.x;
-        entity.targetY = snap.y;
-        entity.action = Boolean(snap.a);
+    if (snapshot.p) {
+      for (const snap of snapshot.p) {
+        const entity = this.playerMap.get(snap.id);
+        if (entity) {
+          entity.targetX = snap.x;
+          entity.targetY = snap.y;
+          entity.action = Boolean(snap.a);
+          entity.score = snap.s || 0;
+          entity.hasKey = Boolean(snap.k);
+          if (entity.keyIcon) {
+            entity.keyIcon.setVisible(entity.hasKey);
+          }
+        }
       }
+    }
+
+    if (snapshot.ent) {
+      this.drawActiveInteractables(snapshot.ent);
+    }
+
+    if (snapshot.lb) {
+      this.drawHostLeaderboard(snapshot.lb);
     }
   }
 

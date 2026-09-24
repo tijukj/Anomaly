@@ -1,4 +1,4 @@
-// server/game/bots.js - Bot simulation runner for ANOMALY
+// server/game/bots.js - Intelligent bot runner that seeks interactables & triggers actions
 import { io } from 'socket.io-client';
 import { CONFIG } from '../config.js';
 
@@ -9,13 +9,12 @@ const BOT_NAMES = [
   'ORBITAL', 'ECHO_PRIME', 'RAZOR_7', 'CHRONO_JET', 'PHANTOM'
 ];
 
-// Parse target count from CLI: `npm run bots -- 15` or default to 8
 const args = process.argv.slice(2);
 const botCountArg = args.find(a => !isNaN(parseInt(a, 10)));
 const BOT_COUNT = Math.min(CONFIG.MAX_PLAYERS, Math.max(1, parseInt(botCountArg, 10) || 8));
 
 const SERVER_URL = `http://localhost:${CONFIG.PORT}`;
-console.log(`\n🤖 Launching ${BOT_COUNT} ANOMALY test bots connecting to ${SERVER_URL}...\n`);
+console.log(`\n🤖 Launching ${BOT_COUNT} ANOMALY AI bots connecting to ${SERVER_URL}...\n`);
 
 const bots = [];
 
@@ -24,19 +23,23 @@ class SimulatedBot {
     this.name = name.slice(0, CONFIG.MAX_NAME_LENGTH);
     this.index = index;
     this.socket = null;
+    this.playerId = null;
+    this.myPos = { x: 800, y: 530 };
+    this.activeInteractables = [];
     this.currentInput = { x: 0, y: 0, action: false };
     this.timer = null;
 
     // AI steering state
     this.targetAngle = Math.random() * Math.PI * 2;
-    this.speedFactor = 0.8 + Math.random() * 0.2;
+    this.speedFactor = 0.85 + Math.random() * 0.15;
     this.isPaused = false;
-    this.nextDecisionTime = Date.now();
+    this.nextWanderTime = Date.now();
     this.actionEndTime = 0;
   }
 
   start() {
     this.socket = io(SERVER_URL, {
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000
@@ -44,16 +47,34 @@ class SimulatedBot {
 
     this.socket.on('connect', () => {
       console.log(`[Bot ${this.index + 1}] Connected -> Joining as "${this.name}"`);
-      this.socket.emit('join_game', {
-        name: this.name
-      });
+      this.socket.emit('join_game', { name: this.name });
     });
 
     this.socket.on('joined_success', (data) => {
+      this.playerId = data.player.id;
       console.log(`[Bot ${this.index + 1}] Joined successfully! Assigned color: ${data.player.color.name}`);
     });
 
-    // 20Hz input loop
+    // Track world state from snapshot
+    this.socket.on('tick_snapshot', (snapshot) => {
+      if (!snapshot) return;
+
+      // Update my position
+      if (snapshot.p && this.playerId) {
+        const me = snapshot.p.find(p => p.id === this.playerId);
+        if (me) {
+          this.myPos.x = me.x;
+          this.myPos.y = me.y;
+        }
+      }
+
+      // Update active interactables list
+      if (snapshot.ent) {
+        this.activeInteractables = snapshot.ent.filter(e => e.state === 'active');
+      }
+    });
+
+    // 20Hz Input loop
     this.timer = setInterval(() => {
       this.updateAI();
       this.socket.emit('player_input', this.currentInput);
@@ -63,34 +84,47 @@ class SimulatedBot {
   updateAI() {
     const now = Date.now();
 
-    // Re-evaluate steering decision
-    if (now >= this.nextDecisionTime) {
-      // 20% chance to pause/idle, 80% chance to steer in a direction
-      this.isPaused = Math.random() < 0.2;
-      this.targetAngle = Math.random() * Math.PI * 2;
-      this.speedFactor = 0.6 + Math.random() * 0.4;
+    // 1. Find nearest active interactable
+    let nearestTarget = null;
+    let nearestDist = 450; // Search vision radius
 
-      // Schedule next steering decision in 1.0 - 3.0 seconds
-      this.nextDecisionTime = now + 1000 + Math.random() * 2000;
-
-      // 25% chance to trigger an action burst
-      if (!this.isPaused && Math.random() < 0.25) {
-        this.actionEndTime = now + 300 + Math.random() * 400;
+    for (const ent of this.activeInteractables) {
+      const dist = Math.hypot(ent.x - this.myPos.x, ent.y - this.myPos.y);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestTarget = ent;
       }
     }
 
-    // Determine current direction vector
-    if (this.isPaused) {
-      this.currentInput.x = 0;
-      this.currentInput.y = 0;
+    if (nearestTarget) {
+      // Steer toward interactable target
+      const angle = Math.atan2(nearestTarget.y - this.myPos.y, nearestTarget.x - this.myPos.x);
+      this.currentInput.x = Math.cos(angle);
+      this.currentInput.y = Math.sin(angle);
+
+      // In interaction range? Trigger action!
+      if (nearestDist <= (nearestTarget.radius || 40) + 15) {
+        this.actionEndTime = now + 250;
+      }
     } else {
-      // Small continuous angle wiggle
-      this.targetAngle += (Math.random() - 0.5) * 0.15;
-      this.currentInput.x = Math.cos(this.targetAngle) * this.speedFactor;
-      this.currentInput.y = Math.sin(this.targetAngle) * this.speedFactor;
+      // 2. Fallback: Organic wandering
+      if (now >= this.nextWanderTime) {
+        this.isPaused = Math.random() < 0.15;
+        this.targetAngle = Math.random() * Math.PI * 2;
+        this.nextWanderTime = now + 1200 + Math.random() * 2000;
+      }
+
+      if (this.isPaused) {
+        this.currentInput.x = 0;
+        this.currentInput.y = 0;
+      } else {
+        this.targetAngle += (Math.random() - 0.5) * 0.1;
+        this.currentInput.x = Math.cos(this.targetAngle) * this.speedFactor;
+        this.currentInput.y = Math.sin(this.targetAngle) * this.speedFactor;
+      }
     }
 
-    // Action state
+    // Set action flag
     this.currentInput.action = now < this.actionEndTime;
   }
 
@@ -100,7 +134,6 @@ class SimulatedBot {
   }
 }
 
-// Spawn bots with slight staggered delay
 for (let i = 0; i < BOT_COUNT; i++) {
   const name = BOT_NAMES[i] || `BOT_${i + 1}`;
   const bot = new SimulatedBot(name, i);
@@ -111,7 +144,6 @@ for (let i = 0; i < BOT_COUNT; i++) {
   }, i * 120);
 }
 
-// Clean shutdown on CTRL+C
 process.on('SIGINT', () => {
   console.log('\n[Bots] Disconnecting all bots...');
   bots.forEach(b => b.stop());

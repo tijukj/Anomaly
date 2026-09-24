@@ -9,6 +9,7 @@
   --bg-card: #0f0f24;
   --border-glow: rgba(0, 240, 255, 0.4);
   --player-theme-color: #00f0ff;
+  --action-btn-color: #ff0055;
 }
 
 * {
@@ -18,7 +19,7 @@
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-  touch-action: none; /* Prevents all native touch gestures like pinch, zoom, scroll */
+  touch-action: none;
 }
 
 html, body {
@@ -42,7 +43,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 12px;
   background: radial-gradient(circle at 50% 10%, rgba(20, 20, 50, 0.6) 0%, rgba(7, 7, 20, 1) 100%);
 }
 
@@ -167,18 +168,17 @@ html, body {
   margin-top: 10px;
 }
 
-.player-pill.mini {
-  margin-top: 0;
-  padding: 6px 14px;
-  gap: 8px;
-}
-
 .player-dot {
   width: 14px;
   height: 14px;
   border-radius: 50%;
   background-color: var(--player-theme-color);
   box-shadow: 0 0 10px var(--player-theme-color);
+}
+
+.mini-dot {
+  width: 10px;
+  height: 10px;
 }
 
 .player-name-display {
@@ -226,18 +226,9 @@ html, body {
 }
 
 @keyframes pulse {
-  0% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 var(--player-theme-color);
-  }
-  70% {
-    transform: scale(1.1);
-    box-shadow: 0 0 0 18px rgba(0, 0, 0, 0);
-  }
-  100% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
-  }
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 var(--player-theme-color); }
+  70% { transform: scale(1.1); box-shadow: 0 0 0 18px rgba(0, 0, 0, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); }
 }
 
 .footer-tip {
@@ -248,30 +239,108 @@ html, body {
 }
 
 /* =========================================================
-   PHASE 2: RUNNING CONTROLLER DECK & JOYSTICK
+   PHASE 4: RUNNING HUD, RANK, SCORE, MISSION & SMART BUTTON
    ========================================================= */
 
 .running-layout {
   max-width: 100%;
   height: 100%;
   justify-content: flex-start;
-  gap: 12px;
+  gap: 10px;
 }
 
-.controller-header {
+.hud-stats-bar {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 6px;
+  gap: 8px;
 }
 
-.sync-badge {
-  font-size: 12px;
-  font-weight: bold;
+.hud-stat-box {
+  background: rgba(15, 15, 36, 0.85);
+  border: 1.5px solid rgba(0, 240, 255, 0.4);
+  border-radius: 12px;
+  padding: 6px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+}
+
+.rank-box {
+  border-color: #ffe600;
+}
+
+.score-box {
+  border-color: #39ff14;
+}
+
+.hud-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #777799;
+}
+
+.hud-value {
+  font-family: 'Impact', 'Arial Black', sans-serif;
+  font-size: 24px;
   letter-spacing: 1px;
-  color: var(--neon-green);
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.6);
+}
+
+.rank-box .hud-value {
+  color: #ffe600;
+}
+
+.score-box .hud-value {
+  color: #39ff14;
+}
+
+.hud-player-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: bold;
+  background: rgba(20, 20, 45, 0.6);
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hud-key-badge {
+  font-size: 14px;
+  margin-left: 2px;
+}
+
+.hud-key-badge.hidden {
+  display: none;
+}
+
+.mission-bar {
+  width: 100%;
+  background: rgba(12, 12, 28, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mission-icon {
+  font-size: 14px;
+}
+
+.mission-text {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #00f0ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .control-deck {
@@ -303,13 +372,13 @@ html, body {
 
 .right-zone {
   border-color: rgba(255, 0, 85, 0.2);
-  padding: 16px;
+  padding: 12px;
 }
 
 .zone-hint {
   position: absolute;
-  bottom: 16px;
-  font-size: 11px;
+  bottom: 14px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 1px;
   color: #555577;
@@ -343,15 +412,15 @@ html, body {
   box-shadow: 0 0 15px var(--player-theme-color);
 }
 
-/* Large Tactile ACTION Button */
+/* Smart Contextual Action Button */
 .action-btn {
   width: 100%;
-  max-width: 160px;
+  max-width: 165px;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #ff3366 0%, #a00030 100%);
-  border: 3px solid #ff6699;
-  box-shadow: 0 0 25px rgba(255, 0, 85, 0.5), inset 0 0 15px rgba(255, 255, 255, 0.3);
+  background: radial-gradient(circle at 35% 35%, var(--action-btn-color, #ff0055) 0%, #3a0015 100%);
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 25px var(--action-btn-color, #ff0055), inset 0 0 15px rgba(255, 255, 255, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -359,19 +428,36 @@ html, body {
   position: relative;
   touch-action: none;
   transition: transform 0.08s ease, filter 0.08s ease;
+  animation: actionPulse 1.4s infinite ease-in-out;
 }
 
-.action-btn:active, .action-btn.pressed {
-  transform: scale(0.92);
-  filter: brightness(1.3);
-  box-shadow: 0 0 35px rgba(255, 0, 85, 0.9), inset 0 0 25px rgba(255, 255, 255, 0.6);
+.action-btn.disabled {
+  background: #181828 !important;
+  border-color: #333348 !important;
+  box-shadow: none !important;
+  opacity: 0.45;
+  animation: none;
+}
+
+@keyframes actionPulse {
+  0% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.05); filter: brightness(1.25); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+.action-btn:active:not(.disabled), .action-btn.pressed:not(.disabled) {
+  transform: scale(0.92) !important;
+  filter: brightness(1.4) !important;
 }
 
 .action-text {
   font-family: 'Impact', 'Arial Black', sans-serif;
-  font-size: 20px;
-  letter-spacing: 2px;
+  font-size: 17px;
+  letter-spacing: 1.5px;
   color: #ffffff;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
   pointer-events: none;
+  text-align: center;
+  padding: 0 8px;
+  line-height: 1.2;
 }

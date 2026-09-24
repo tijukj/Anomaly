@@ -23,11 +23,18 @@ const lobbyPlayerName = document.getElementById('lobby-player-name');
 const runningPlayerDot = document.getElementById('running-player-dot');
 const runningPlayerName = document.getElementById('running-player-name');
 
+// HUD Elements
+const hudRank = document.getElementById('hud-rank');
+const hudScore = document.getElementById('hud-score');
+const hudKeyBadge = document.getElementById('hud-key-badge');
+const hudMission = document.getElementById('hud-mission');
+
 // Controller Elements
 const joystickZone = document.getElementById('joystick-zone');
 const joystickBase = document.getElementById('joystick-base');
 const joystickKnob = document.getElementById('joystick-knob');
 const actionBtn = document.getElementById('action-btn');
+const actionText = document.getElementById('action-text');
 
 let localPlayer = null;
 let currentGameState = 'LOBBY';
@@ -50,17 +57,13 @@ async function requestDeviceLocks() {
   if ('wakeLock' in navigator) {
     try {
       await navigator.wakeLock.request('screen');
-    } catch (err) {
-      console.log('[Phone] WakeLock not allowed:', err.message);
-    }
+    } catch (err) {}
   }
 
   if (screen.orientation && screen.orientation.lock) {
     try {
       await screen.orientation.lock('portrait');
-    } catch (err) {
-      // Ignore if not supported on iOS Safari
-    }
+    } catch (err) {}
   }
 }
 
@@ -71,7 +74,6 @@ document.addEventListener('touchmove', (e) => {
   if (e.touches.length > 1) e.preventDefault();
 }, { passive: false });
 
-// Update name char count
 nameInput.addEventListener('input', () => {
   charCount.textContent = nameInput.value.length;
 });
@@ -144,10 +146,8 @@ joystickZone.addEventListener('touchmove', (e) => {
         clampedY = (deltaY / distance) * MAX_JOYSTICK_RADIUS;
       }
 
-      // Move visual knob
       joystickKnob.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
 
-      // Normalized output vector [-1.0, 1.0]
       currentInput.x = Math.round((clampedX / MAX_JOYSTICK_RADIUS) * 100) / 100;
       currentInput.y = Math.round((clampedY / MAX_JOYSTICK_RADIUS) * 100) / 100;
       transmitInputIfChanged();
@@ -177,13 +177,11 @@ joystickZone.addEventListener('touchend', (e) => {
 joystickZone.addEventListener('touchcancel', resetJoystick);
 
 // -------------------------------------------------------------
-// Action Button Logic
+// Smart Action Button Handlers
 // -------------------------------------------------------------
 function triggerHaptic() {
   if (navigator.vibrate) {
-    try {
-      navigator.vibrate(40);
-    } catch (e) {}
+    try { navigator.vibrate(40); } catch (e) {}
   }
 }
 
@@ -192,14 +190,14 @@ actionBtn.addEventListener('pointerdown', (e) => {
   actionBtn.classList.add('pressed');
   currentInput.action = true;
   triggerHaptic();
-  transmitInputIfChanged();
+  transmitInputIfChanged(true);
 });
 
 const releaseAction = (e) => {
   if (currentInput.action) {
     actionBtn.classList.remove('pressed');
     currentInput.action = false;
-    transmitInputIfChanged();
+    transmitInputIfChanged(true);
   }
 };
 
@@ -208,7 +206,7 @@ actionBtn.addEventListener('pointercancel', releaseAction);
 actionBtn.addEventListener('pointerleave', releaseAction);
 
 // -------------------------------------------------------------
-// Low-Latency Input Transmission Loop (20Hz + 250ms Heartbeat)
+// Input Transmission Loop (20Hz + 250ms Heartbeat)
 // -------------------------------------------------------------
 function transmitInputIfChanged(force = false) {
   if (!localPlayer || currentGameState !== 'RUNNING') return;
@@ -228,7 +226,6 @@ function transmitInputIfChanged(force = false) {
   }
 }
 
-// 20Hz Input Heartbeat Timer
 setInterval(() => {
   transmitInputIfChanged();
 }, SEND_INTERVAL_MS);
@@ -253,7 +250,6 @@ joinForm.addEventListener('submit', (e) => {
   });
 });
 
-// Socket Event: Successfully joined
 socket.on('joined_success', (data) => {
   localPlayer = data.player;
   currentGameState = data.gameState || 'LOBBY';
@@ -270,7 +266,39 @@ socket.on('joined_success', (data) => {
   }
 });
 
-// Socket Event: Game state updates
+// Socket Event: Personal Player HUD (Rank, Score, Mission & Smart Button)
+socket.on('player_hud', (data) => {
+  if (!data) return;
+
+  // Update Rank & Score
+  hudRank.textContent = `#${data.rank || 1}`;
+  hudScore.textContent = `${data.score || 0}`;
+
+  if (data.hasKey) {
+    hudKeyBadge.classList.remove('hidden');
+  } else {
+    hudKeyBadge.classList.add('hidden');
+  }
+
+  if (data.mission) {
+    hudMission.textContent = data.mission;
+  }
+
+  // Update Smart Action Button
+  const btnState = data.actionBtn;
+  if (btnState && btnState.available) {
+    actionBtn.classList.remove('disabled');
+    actionText.textContent = btnState.label || 'ACTION';
+    if (btnState.color) {
+      document.documentElement.style.setProperty('--action-btn-color', btnState.color);
+    }
+  } else {
+    actionBtn.classList.add('disabled');
+    actionText.textContent = (btnState && btnState.label) || 'NO TARGET';
+    document.documentElement.style.setProperty('--action-btn-color', '#333344');
+  }
+});
+
 socket.on('game_state_update', (publicState) => {
   currentGameState = publicState.state;
 
@@ -298,7 +326,6 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   if (savedId && savedName) {
-    console.log('[Phone] Auto-reconnecting saved racer:', savedName);
     socket.emit('join_game', {
       playerId: savedId,
       name: savedName
