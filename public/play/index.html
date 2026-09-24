@@ -15,7 +15,7 @@
     <!-- View 1: Join Screen -->
     <div id="join-view" class="view active">
       <div class="logo-badge">ANOMALY</div>
-      <h1 class="title">PLAYER ACCESS</h1>
+      <h1 class="title">RACER ACCESS</h1>
       <p class="subtitle">Enter your racer handle</p>
 
       <form id="join-form">
@@ -51,24 +51,39 @@
         <p class="status-sub">Waiting for host to start match...</p>
       </div>
 
-      <div class="footer-tip">Keep this screen open</div>
+      <div class="footer-tip">Keep screen unlocked</div>
     </div>
 
-    <!-- View 3: Running Screen -->
-    <div id="running-view" class="view">
-      <div class="player-pill">
-        <div class="player-dot" id="running-player-dot"></div>
-        <div class="player-name-display" id="running-player-name">---</div>
+    <!-- View 3: Running Controller Screen -->
+    <div id="running-view" class="view running-layout">
+      <!-- Top Status Bar -->
+      <div class="controller-header">
+        <div class="player-pill mini">
+          <div class="player-dot" id="running-player-dot"></div>
+          <div class="player-name-display" id="running-player-name">---</div>
+        </div>
+        <div class="sync-badge">● LIVE</div>
       </div>
 
-      <div class="status-box running-box">
-        <h1 class="running-title">MATCH RUNNING</h1>
-        <p class="running-sub">Look at the big screen!</p>
-      </div>
+      <!-- Main Game Controller Surface -->
+      <div class="control-deck">
+        <!-- Left Half: Floating Joystick Touch Zone -->
+        <div id="joystick-zone" class="touch-zone left-zone">
+          <div class="zone-hint">TOUCH & DRAG TO MOVE</div>
+          
+          <!-- Floating Joystick Element -->
+          <div id="joystick-base" class="joystick-base">
+            <div id="joystick-knob" class="joystick-knob"></div>
+          </div>
+        </div>
 
-      <div class="controller-placeholder">
-        <div class="radar-scan"></div>
-        <div class="hud-status">CONTROLLER SYNCED</div>
+        <!-- Right Half: Action Button Zone -->
+        <div class="touch-zone right-zone">
+          <button type="button" id="action-btn" class="action-btn">
+            <span class="action-text">ACTION</span>
+            <span class="action-glow-ring"></span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

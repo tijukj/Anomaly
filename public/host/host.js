@@ -1,9 +1,12 @@
-// public/host/host.js - Big Screen Phaser 3 Host Display
+// public/host/host.js - Big Screen Phaser 3 Host Arena & Lobby
 const socket = io();
+
+const WORLD_WIDTH = 1600;
+const WORLD_HEIGHT = 1000;
 
 let serverInfo = {
   playUrl: 'Loading...',
-  qrCodeDataUrl: ''
+  lanIp: '127.0.0.1'
 };
 
 let currentGameState = {
@@ -13,7 +16,14 @@ let currentGameState = {
   canStart: false
 };
 
-// Fetch server info (LAN IP, QR Code)
+// Snapshot interpolation state
+let latestSnapshot = null;
+let lastSnapshotTime = 0;
+let snapshotBytes = 0;
+let serverTickTimeMs = 0;
+let showDebugOverlay = false;
+
+// Fetch server info
 async function fetchServerInfo() {
   try {
     const res = await fetch('/api/server-info');
@@ -26,46 +36,63 @@ async function fetchServerInfo() {
 class HostScene extends Phaser.Scene {
   constructor() {
     super({ key: 'HostScene' });
-    this.bgGraphics = null;
-    this.uiContainer = null;
-    this.qrImage = null;
-    this.playerObjects = [];
+    this.playerMap = new Map(); // id -> { container, circle, glow, ring, labelText, targetX, targetY, currentX, currentY, color }
+    this.debugContainer = null;
   }
 
-  async preload() {
+  preload() {
+    // Load QR code directly from PNG stream
+    this.load.image('qrcode', '/api/qr.png');
+  }
+
+  async create() {
     await fetchServerInfo();
-  }
 
-  create() {
     this.cameras.main.setBackgroundColor('#070714');
+    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
     this.bgGraphics = this.add.graphics();
-    this.uiContainer = this.add.container(0, 0);
+    this.lobbyContainer = this.add.container(0, 0);
+    this.arenaContainer = this.add.container(0, 0);
+    this.debugContainer = this.add.container(20, 20);
 
-    // If QR code is available, load texture into Phaser
-    if (serverInfo.qrCodeDataUrl) {
-      this.textures.once('addtexture-qrcode', () => {
-        this.renderUI();
-      });
-      this.textures.addBase64('qrcode', serverInfo.qrCodeDataUrl);
-    }
-
-    // Spacebar to start match
+    // Keyboard controls
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.spaceKey.on('down', () => {
-      this.triggerStartMatch();
+    this.spaceKey.on('down', () => this.triggerStartMatch());
+
+    this.dKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.dKey.on('down', () => {
+      showDebugOverlay = !showDebugOverlay;
+      this.debugContainer.setVisible(showDebugOverlay);
     });
 
-    // Listen to window resizing
-    this.scale.on('resize', this.handleResize, this);
-
-    // Listen for socket updates
+    // Socket Event: Full state update
     socket.on('game_state_update', (state) => {
+      const prevState = currentGameState.state;
       currentGameState = state;
-      this.renderUI();
+      if (prevState !== state.state) {
+        this.onStateChanged(state.state);
+      }
+      this.renderLobbyUI();
+      this.updatePlayerRoster(state.players);
+    });
+
+    // Socket Event: 20Hz compact tick snapshot
+    socket.on('tick_snapshot', (snapshot) => {
+      latestSnapshot = snapshot;
+      lastSnapshotTime = performance.now();
+      serverTickTimeMs = snapshot.tickTime || 0;
+      snapshotBytes = new Blob([JSON.stringify(snapshot)]).size;
+
+      if (currentGameState.state === 'RUNNING') {
+        this.applySnapshot(snapshot);
+      }
     });
 
     this.drawBackground();
-    this.renderUI();
+    this.renderLobbyUI();
+    this.setupDebugOverlay();
+    this.debugContainer.setVisible(showDebugOverlay);
   }
 
   triggerStartMatch() {
@@ -74,279 +101,387 @@ class HostScene extends Phaser.Scene {
     }
   }
 
-  handleResize() {
-    this.drawBackground();
-    this.renderUI();
+  onStateChanged(newState) {
+    if (newState === 'RUNNING') {
+      this.lobbyContainer.setVisible(false);
+      this.arenaContainer.setVisible(true);
+      this.drawArenaBoundary();
+    } else {
+      this.lobbyContainer.setVisible(true);
+      this.arenaContainer.setVisible(false);
+      this.clearAllPlayerEntities();
+      this.renderLobbyUI();
+    }
   }
 
   drawBackground() {
-    const { width, height } = this.scale;
     this.bgGraphics.clear();
+    const w = WORLD_WIDTH;
+    const h = WORLD_HEIGHT;
 
     // Dark cyber grid lines
-    this.bgGraphics.lineStyle(1, 0x181830, 0.4);
-    const gridSize = 40;
-    for (let x = 0; x < width; x += gridSize) {
-      this.bgGraphics.lineBetween(x, 0, x, height);
+    this.bgGraphics.lineStyle(1, 0x14142b, 0.5);
+    const gridSize = 50;
+    for (let x = 0; x <= w; x += gridSize) {
+      this.bgGraphics.lineBetween(x, 0, x, h);
     }
-    for (let y = 0; y < height; y += gridSize) {
-      this.bgGraphics.lineBetween(0, y, width, y);
-    }
-
-    // Top accent neon line
-    this.bgGraphics.lineStyle(3, 0x00F0FF, 0.8);
-    this.bgGraphics.lineBetween(0, 2, width, 2);
-  }
-
-  renderUI() {
-    const { width, height } = this.scale;
-    this.uiContainer.removeAll(true);
-    this.playerObjects = [];
-
-    if (currentGameState.state === 'LOBBY') {
-      this.renderLobby(width, height);
-    } else if (currentGameState.state === 'RUNNING') {
-      this.renderRunning(width, height);
+    for (let y = 0; y <= h; y += gridSize) {
+      this.bgGraphics.lineBetween(0, y, w, y);
     }
   }
 
-  renderLobby(width, height) {
-    // 1. Title & Header
-    const title = this.add.text(width / 2, 50, 'A N O M A L Y', {
+  drawArenaBoundary() {
+    this.arenaContainer.removeAll(true);
+    const w = WORLD_WIDTH;
+    const h = WORLD_HEIGHT;
+    const pad = 24;
+
+    const bounds = this.add.graphics();
+    // Glowing border
+    bounds.lineStyle(4, 0x00F0FF, 0.9);
+    bounds.strokeRoundedRect(pad, pad, w - pad * 2, h - pad * 2, 16);
+
+    // Corner accents
+    bounds.lineStyle(2, 0xFF0055, 0.8);
+    const cornerSize = 40;
+    bounds.lineBetween(pad, pad + cornerSize, pad, pad);
+    bounds.lineBetween(pad, pad, pad + cornerSize, pad);
+
+    bounds.lineBetween(w - pad, pad + cornerSize, w - pad, pad);
+    bounds.lineBetween(w - pad, pad, w - pad - cornerSize, pad);
+
+    bounds.lineBetween(pad, h - pad - cornerSize, pad, h - pad);
+    bounds.lineBetween(pad, h - pad, pad + cornerSize, h - pad);
+
+    bounds.lineBetween(w - pad, h - pad - cornerSize, w - pad, h - pad);
+    bounds.lineBetween(w - pad, h - pad, w - pad - cornerSize, h - pad);
+
+    // Arena center ring
+    bounds.lineStyle(2, 0x202048, 0.6);
+    bounds.strokeCircle(w / 2, h / 2, 180);
+    bounds.strokeCircle(w / 2, h / 2, 40);
+
+    this.arenaContainer.add(bounds);
+  }
+
+  renderLobbyUI() {
+    if (currentGameState.state !== 'LOBBY') return;
+    this.lobbyContainer.removeAll(true);
+
+    const w = WORLD_WIDTH;
+    const h = WORLD_HEIGHT;
+
+    // 1. Header Title
+    const title = this.add.text(w / 2, 70, 'A N O M A L Y', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: '46px',
+      fontSize: '64px',
       color: '#00F0FF',
-      letterSpacing: 8
+      letterSpacing: 12
     }).setOrigin(0.5);
 
-    const subtitle = this.add.text(width / 2, 95, 'REAL-TIME MULTIPLAYER TREASURE RACE', {
+    const subtitle = this.add.text(w / 2, 130, 'REAL-TIME MULTIPLAYER TREASURE RACE', {
       fontFamily: 'sans-serif',
-      fontSize: '14px',
+      fontSize: '18px',
       color: '#8888AA',
-      letterSpacing: 4
+      letterSpacing: 6
     }).setOrigin(0.5);
 
-    this.uiContainer.add([title, subtitle]);
+    this.lobbyContainer.add([title, subtitle]);
 
-    // Layout dimensions
-    const isWide = width >= 900;
-    const contentY = 140;
-    const contentHeight = height - contentY - 120;
+    // 2. Left Panel: QR Code & Join URL Box
+    const leftX = w * 0.28;
+    const leftY = 520;
+    const boxW = 440;
+    const boxH = 500;
 
-    // 2. Left Panel: QR Code & Join Info
-    const leftPanelWidth = isWide ? Math.min(360, width * 0.38) : width - 40;
-    const leftPanelX = isWide ? width * 0.25 : width / 2;
-    const leftPanelY = isWide ? contentY + contentHeight / 2 : contentY + 160;
-
-    // QR Box background
     const qrBox = this.add.graphics();
-    qrBox.fillStyle(0x0e0e22, 0.8);
-    qrBox.fillRoundedRect(leftPanelX - leftPanelWidth / 2, leftPanelY - 170, leftPanelWidth, 340, 16);
-    qrBox.lineStyle(2, 0x00F0FF, 0.5);
-    qrBox.strokeRoundedRect(leftPanelX - leftPanelWidth / 2, leftPanelY - 170, leftPanelWidth, 340, 16);
-    this.uiContainer.add(qrBox);
+    qrBox.fillStyle(0x0c0c20, 0.85);
+    qrBox.fillRoundedRect(leftX - boxW / 2, leftY - boxH / 2, boxW, boxH, 20);
+    qrBox.lineStyle(2, 0x00F0FF, 0.6);
+    qrBox.strokeRoundedRect(leftX - boxW / 2, leftY - boxH / 2, boxW, boxH, 20);
+    this.lobbyContainer.add(qrBox);
 
-    const scanText = this.add.text(leftPanelX, leftPanelY - 145, 'SCAN TO JOIN WITH PHONE', {
+    const scanHeader = this.add.text(leftX, leftY - 190, 'SCAN WITH PHONE CAMERA', {
       fontFamily: 'sans-serif',
-      fontSize: '14px',
+      fontSize: '18px',
       fontStyle: 'bold',
       color: '#00F0FF',
       letterSpacing: 2
     }).setOrigin(0.5);
-    this.uiContainer.add(scanText);
+    this.lobbyContainer.add(scanHeader);
 
-    // QR Code Image
+    // QR Image sprite
     if (this.textures.exists('qrcode')) {
-      const qrSprite = this.add.image(leftPanelX, leftPanelY - 20, 'qrcode');
-      qrSprite.setDisplaySize(180, 180);
-      this.uiContainer.add(qrSprite);
+      const qrSprite = this.add.image(leftX, leftY - 30, 'qrcode');
+      qrSprite.setDisplaySize(240, 240);
+      this.lobbyContainer.add(qrSprite);
     }
 
-    // URL Display
-    const urlLabel = this.add.text(leftPanelX, leftPanelY + 95, 'OR VISIT ON BROWSER:', {
+    const orLabel = this.add.text(leftX, leftY + 125, 'OR BROWSER ADDRESS:', {
       fontFamily: 'sans-serif',
-      fontSize: '11px',
-      color: '#777799'
+      fontSize: '14px',
+      color: '#777799',
+      letterSpacing: 1
     }).setOrigin(0.5);
 
-    const urlText = this.add.text(leftPanelX, leftPanelY + 120, serverInfo.playUrl || 'http://...', {
+    const urlDisplay = this.add.text(leftX, leftY + 160, serverInfo.playUrl || 'http://...', {
       fontFamily: 'monospace',
-      fontSize: '15px',
+      fontSize: '20px',
       fontStyle: 'bold',
       color: '#FFE600'
     }).setOrigin(0.5);
-    this.uiContainer.add([urlLabel, urlText]);
+    this.lobbyContainer.add([orLabel, urlDisplay]);
 
     // 3. Right Panel: Player Roster
-    const rightPanelX = isWide ? width * 0.65 : width / 2;
-    const rightPanelY = isWide ? contentY : contentY + 360;
-    const rightPanelWidth = isWide ? width * 0.45 : width - 40;
+    const rightX = w * 0.72;
+    const rightY = 280;
+    const rightW = 560;
 
-    const playersHeader = this.add.text(rightPanelX, rightPanelY, `PLAYERS JOINED (${currentGameState.playerCount}/20)`, {
+    const rosterHeader = this.add.text(rightX, rightY, `RACERS JOINED (${currentGameState.playerCount}/20)`, {
       fontFamily: 'sans-serif',
-      fontSize: '16px',
+      fontSize: '22px',
       fontStyle: 'bold',
       color: '#FFFFFF',
-      letterSpacing: 2
+      letterSpacing: 3
     }).setOrigin(0.5, 0);
-    this.uiContainer.add(playersHeader);
+    this.lobbyContainer.add(rosterHeader);
 
-    // Players list / grid
     if (currentGameState.players.length === 0) {
-      const noPlayersText = this.add.text(rightPanelX, rightPanelY + 60, 'Waiting for players to connect...\nScan the QR code on your phone to enter.', {
+      const emptyMsg = this.add.text(rightX, rightY + 90, 'Waiting for racers to connect...\nScan the QR code on your phone to enter.', {
         fontFamily: 'sans-serif',
-        fontSize: '14px',
+        fontSize: '18px',
         color: '#555577',
         align: 'center',
-        lineSpacing: 8
+        lineSpacing: 10
       }).setOrigin(0.5, 0);
-      this.uiContainer.add(noPlayersText);
+      this.lobbyContainer.add(emptyMsg);
     } else {
-      const startListY = rightPanelY + 40;
-      const cols = isWide ? 2 : 2;
-      const colWidth = rightPanelWidth / cols;
-      const itemHeight = 44;
+      const cols = 2;
+      const colW = rightW / cols;
+      const itemH = 54;
+      const startListY = rightY + 50;
 
       currentGameState.players.forEach((p, idx) => {
         const col = idx % cols;
         const row = Math.floor(idx / cols);
-        const itemX = rightPanelX - rightPanelWidth / 2 + col * colWidth + 10;
-        const itemY = startListY + row * itemHeight;
+        const cardX = rightX - rightW / 2 + col * colW + 10;
+        const cardY = startListY + row * itemH;
 
-        // Player card background
-        const cardBg = this.add.graphics();
-        cardBg.fillStyle(0x13132a, 0.7);
-        cardBg.fillRoundedRect(itemX, itemY, colWidth - 20, 36, 8);
-        cardBg.lineStyle(1, p.color.num, 0.6);
-        cardBg.strokeRoundedRect(itemX, itemY, colWidth - 20, 36, 8);
-        this.uiContainer.add(cardBg);
+        const card = this.add.graphics();
+        card.fillStyle(0x111128, 0.85);
+        card.fillRoundedRect(cardX, cardY, colW - 20, 44, 10);
+        card.lineStyle(1.5, p.color.num, 0.7);
+        card.strokeRoundedRect(cardX, cardY, colW - 20, 44, 10);
+        this.lobbyContainer.add(card);
 
-        // Player color circle
         const circle = this.add.graphics();
         circle.fillStyle(p.color.num, 1);
-        circle.fillCircle(itemX + 22, itemY + 18, 9);
-        this.uiContainer.add(circle);
+        circle.fillCircle(cardX + 24, cardY + 22, 11);
+        this.lobbyContainer.add(circle);
 
-        // Player Name text
-        const nameText = this.add.text(itemX + 42, itemY + 18, p.name, {
+        const name = this.add.text(cardX + 46, cardY + 22, p.name, {
           fontFamily: 'sans-serif',
-          fontSize: '14px',
+          fontSize: '16px',
           fontStyle: 'bold',
           color: '#FFFFFF'
         }).setOrigin(0, 0.5);
-        this.uiContainer.add(nameText);
+        this.lobbyContainer.add(name);
       });
     }
 
-    // 4. Bottom: START MATCH Button
-    const btnY = height - 60;
-    const btnWidth = 280;
-    const btnHeight = 52;
+    // 4. Bottom Start Button
+    const btnY = h - 100;
+    const btnW = 340;
+    const btnH = 64;
     const canStart = currentGameState.canStart;
 
-    const btnBg = this.add.graphics();
-    btnBg.fillStyle(canStart ? 0x00F0FF : 0x222233, 1);
-    btnBg.fillRoundedRect(width / 2 - btnWidth / 2, btnY - btnHeight / 2, btnWidth, btnHeight, 10);
+    const btn = this.add.graphics();
+    btn.fillStyle(canStart ? 0x00F0FF : 0x222238, 1);
+    btn.fillRoundedRect(w / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 14);
     if (canStart) {
-      btnBg.lineStyle(2, 0xFFFFFF, 0.9);
-      btnBg.strokeRoundedRect(width / 2 - btnWidth / 2, btnY - btnHeight / 2, btnWidth, btnHeight, 10);
+      btn.lineStyle(3, 0xFFFFFF, 0.9);
+      btn.strokeRoundedRect(w / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 14);
     }
-    this.uiContainer.add(btnBg);
+    this.lobbyContainer.add(btn);
 
-    const btnText = this.add.text(width / 2, btnY, canStart ? 'START MATCH' : 'WAITING FOR PLAYERS', {
+    const btnText = this.add.text(w / 2, btnY, canStart ? 'START MATCH' : 'WAITING FOR PLAYERS', {
       fontFamily: 'sans-serif',
-      fontSize: '18px',
+      fontSize: '22px',
       fontStyle: 'bold',
       color: canStart ? '#050510' : '#666688',
-      letterSpacing: 2
+      letterSpacing: 3
     }).setOrigin(0.5);
-    this.uiContainer.add(btnText);
+    this.lobbyContainer.add(btnText);
 
     if (canStart) {
-      const hintText = this.add.text(width / 2, btnY + 36, '[ Click or Press SPACE to Launch ]', {
+      const hint = this.add.text(w / 2, btnY + 46, '[ Click or Press SPACE to Launch ]', {
         fontFamily: 'sans-serif',
-        fontSize: '12px',
+        fontSize: '14px',
         color: '#00F0FF'
       }).setOrigin(0.5);
-      this.uiContainer.add(hintText);
+      this.lobbyContainer.add(hint);
 
-      // Make button interactive
-      const hitArea = this.add.zone(width / 2, btnY, btnWidth, btnHeight).setOrigin(0.5).setInteractive({ useHandCursor: true });
-      hitArea.on('pointerdown', () => this.triggerStartMatch());
-      this.uiContainer.add(hitArea);
+      const zone = this.add.zone(w / 2, btnY, btnW, btnH).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      zone.on('pointerdown', () => this.triggerStartMatch());
+      this.lobbyContainer.add(zone);
     }
   }
 
-  renderRunning(width, height) {
-    // Header
-    const banner = this.add.text(width / 2, height * 0.2, '⚡ MATCH RUNNING ⚡', {
-      fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: '52px',
-      color: '#39FF14',
-      letterSpacing: 6
-    }).setOrigin(0.5);
+  updatePlayerRoster(playerList) {
+    if (!playerList) return;
+    const activeIds = new Set(playerList.map(p => p.id));
 
-    const sub = this.add.text(width / 2, height * 0.28, 'TREASURE RACE IN PROGRESS - PLAYERS COMPETING', {
+    // Remove obsolete player entities
+    for (const [id, entity] of this.playerMap.entries()) {
+      if (!activeIds.has(id)) {
+        entity.container.destroy();
+        this.playerMap.delete(id);
+      }
+    }
+
+    // Create or update entities
+    for (const p of playerList) {
+      if (!this.playerMap.has(p.id)) {
+        this.createPlayerEntity(p);
+      }
+    }
+  }
+
+  createPlayerEntity(p) {
+    const container = this.add.container(p.x || WORLD_WIDTH / 2, p.y || WORLD_HEIGHT / 2);
+    const radius = 24;
+
+    // Glowing outer ring
+    const glow = this.add.graphics();
+    glow.fillStyle(p.color.num, 0.25);
+    glow.fillCircle(0, 0, radius + 8);
+
+    // Action pulse ring (hidden by default)
+    const ring = this.add.graphics();
+    ring.lineStyle(3, p.color.num, 0.9);
+    ring.strokeCircle(0, 0, radius + 14);
+    ring.setVisible(false);
+
+    // Main solid circle
+    const circle = this.add.graphics();
+    circle.fillStyle(p.color.num, 1);
+    circle.fillCircle(0, 0, radius);
+    circle.lineStyle(2, 0xFFFFFF, 0.8);
+    circle.strokeCircle(0, 0, radius);
+
+    // Inner bright core
+    const core = this.add.graphics();
+    core.fillStyle(0xFFFFFF, 0.9);
+    core.fillCircle(0, 0, 6);
+
+    // Name tag above
+    const nameTag = this.add.text(0, -radius - 14, p.name, {
       fontFamily: 'sans-serif',
-      fontSize: '16px',
-      color: '#AAAAFF',
-      letterSpacing: 3
-    }).setOrigin(0.5);
-
-    this.uiContainer.add([banner, sub]);
-
-    // Player Grid
-    const activeCountText = this.add.text(width / 2, height * 0.4, `ACTIVE RACERS (${currentGameState.playerCount})`, {
-      fontFamily: 'sans-serif',
-      fontSize: '18px',
+      fontSize: '14px',
       fontStyle: 'bold',
       color: '#FFFFFF',
-      letterSpacing: 2
+      backgroundColor: 'rgba(5, 5, 15, 0.75)',
+      padding: { x: 6, y: 2 }
     }).setOrigin(0.5);
-    this.uiContainer.add(activeCountText);
 
-    const startY = height * 0.48;
-    const cardWidth = 200;
-    const cardHeight = 44;
-    const cols = Math.min(4, Math.max(1, Math.floor((width - 40) / (cardWidth + 20))));
-    const spacingX = (width - 60) / cols;
+    container.add([glow, ring, circle, core, nameTag]);
+    container.setDepth(10);
 
-    currentGameState.players.forEach((p, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const x = width / 2 - ((cols - 1) * spacingX) / 2 + col * spacingX;
-      const y = startY + row * (cardHeight + 16);
-
-      const card = this.add.graphics();
-      card.fillStyle(0x111126, 0.85);
-      card.fillRoundedRect(x - cardWidth / 2, y - cardHeight / 2, cardWidth, cardHeight, 8);
-      card.lineStyle(2, p.color.num, 0.8);
-      card.strokeRoundedRect(x - cardWidth / 2, y - cardHeight / 2, cardWidth, cardHeight, 8);
-      this.uiContainer.add(card);
-
-      const dot = this.add.graphics();
-      dot.fillStyle(p.color.num, 1);
-      dot.fillCircle(x - cardWidth / 2 + 22, y, 10);
-      this.uiContainer.add(dot);
-
-      const name = this.add.text(x - cardWidth / 2 + 42, y, p.name, {
-        fontFamily: 'sans-serif',
-        fontSize: '15px',
-        fontStyle: 'bold',
-        color: '#FFFFFF'
-      }).setOrigin(0, 0.5);
-      this.uiContainer.add(name);
+    this.playerMap.set(p.id, {
+      container,
+      circle,
+      glow,
+      ring,
+      labelText: nameTag,
+      targetX: p.x || WORLD_WIDTH / 2,
+      targetY: p.y || WORLD_HEIGHT / 2,
+      currentX: p.x || WORLD_WIDTH / 2,
+      currentY: p.y || WORLD_HEIGHT / 2,
+      action: false,
+      color: p.color
     });
+  }
+
+  clearAllPlayerEntities() {
+    for (const entity of this.playerMap.values()) {
+      entity.container.destroy();
+    }
+    this.playerMap.clear();
+  }
+
+  applySnapshot(snapshot) {
+    if (!snapshot || !snapshot.p) return;
+
+    for (const snap of snapshot.p) {
+      const entity = this.playerMap.get(snap.id);
+      if (entity) {
+        entity.targetX = snap.x;
+        entity.targetY = snap.y;
+        entity.action = Boolean(snap.a);
+      }
+    }
+  }
+
+  setupDebugOverlay() {
+    this.debugBg = this.add.graphics();
+    this.debugBg.fillStyle(0x050515, 0.85);
+    this.debugBg.fillRoundedRect(0, 0, 280, 130, 8);
+    this.debugBg.lineStyle(1, 0x00F0FF, 0.8);
+    this.debugBg.strokeRoundedRect(0, 0, 280, 130, 8);
+
+    this.debugText = this.add.text(14, 14, '', {
+      fontFamily: 'monospace',
+      fontSize: '13px',
+      color: '#00F0FF',
+      lineSpacing: 4
+    });
+
+    this.debugContainer.add([this.debugBg, this.debugText]);
+    this.debugContainer.setDepth(100);
+  }
+
+  update(time, delta) {
+    const isRunning = currentGameState.state === 'RUNNING';
+
+    // Smooth position interpolation (lerp)
+    const lerpFactor = Math.min(1, (delta / 1000) * 18);
+
+    for (const entity of this.playerMap.values()) {
+      if (isRunning) {
+        entity.currentX += (entity.targetX - entity.currentX) * lerpFactor;
+        entity.currentY += (entity.targetY - entity.currentY) * lerpFactor;
+        entity.container.setPosition(entity.currentX, entity.currentY);
+
+        // Action effect visual
+        entity.ring.setVisible(entity.action);
+        if (entity.action) {
+          entity.ring.setScale(1 + Math.sin(time / 50) * 0.15);
+        }
+      }
+    }
+
+    // Update debug overlay info
+    if (showDebugOverlay) {
+      const fps = Math.round(this.game.loop.actualFps);
+      this.debugText.setText(
+        `[DEBUG OVERLAY] (Press D)\n` +
+        `FPS          : ${fps}\n` +
+        `Players      : ${currentGameState.playerCount}/20\n` +
+        `Server Tick  : ${serverTickTimeMs} ms\n` +
+        `Snapshot Size: ${snapshotBytes} bytes\n` +
+        `State        : ${currentGameState.state}`
+      );
+    }
   }
 }
 
 const config = {
   type: Phaser.AUTO,
   parent: 'game-container',
-  width: window.innerWidth,
-  height: window.innerHeight,
+  width: WORLD_WIDTH,
+  height: WORLD_HEIGHT,
   scale: {
-    mode: Phaser.Scale.RESIZE,
+    mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
   scene: [HostScene]

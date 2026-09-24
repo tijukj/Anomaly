@@ -6,6 +6,21 @@ export const CONFIG = {
   HOST: '0.0.0.0',
   TICK_RATE: 20, // 20 ticks per second
   TICK_INTERVAL_MS: 1000 / 20, // 50ms per tick
+  INPUT_HEARTBEAT_MS: 250, // 250ms heartbeat for controller inputs
+
+  // World Map Dimensions (Host canvas maps to this resolution)
+  WORLD: {
+    WIDTH: 1600,
+    HEIGHT: 1000
+  },
+
+  // Authoritative Physics & Movement
+  PHYSICS: {
+    MAX_SPEED: 420, // Maximum pixels per second
+    ACCELERATION: 1600, // Pixels per second squared
+    FRICTION: 0.85, // Velocity damping factor per tick (0 = full stop, 1 = ice)
+    PLAYER_RADIUS: 24 // Collision & render radius
+  },
 
   // Player Settings
   MAX_PLAYERS: 20,
