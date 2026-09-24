@@ -6,6 +6,7 @@ import { ScoringSystem } from './scoring.js';
 import { InteractableManager } from './interactables.js';
 import { MissionManager } from './missions.js';
 import { ClueManager } from './clueManager.js';
+import { AnomalyManager } from './anomalyManager.js';
 import crypto from 'crypto';
 
 export class GameManager {
@@ -20,9 +21,11 @@ export class GameManager {
 
     // Subsystems
     this.scoring = new ScoringSystem(io);
+    this.scoring.setGameManager(this);
     this.clues = new ClueManager(this, this.scoring);
     this.interactables = new InteractableManager(this, this.scoring);
     this.missions = new MissionManager(this, this.scoring);
+    this.anomalies = new AnomalyManager(this, this.scoring);
 
     // Lifecycle & Timeline
     this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
@@ -79,6 +82,7 @@ export class GameManager {
     this.clues.initForMatch(this.matchSeed);
     this.interactables.initForMatch(this.matchSeed, this.seededPois, this.currentPhase);
     this.missions.initForMatch(this.matchSeed);
+    this.anomalies.initForMatch(this.matchSeed);
     console.log(`[Map] Seeded Match Initialized [Seed: #${this.matchSeed}] [Duration: ${this.totalMatchDurationSec}s]`);
   }
 
@@ -129,7 +133,10 @@ export class GameManager {
       // 5. Dynamic Missions Lifecycle
       this.missions.tick(activePlayerList, this.matchTimeRemaining, this.totalMatchDurationSec);
 
-      // 6. Compute Live Leaderboard
+      // 6. Phase 8 Anomalies Lifecycle
+      this.anomalies.tick(Date.now(), activePlayerList, elapsedFraction, this.currentPhase);
+
+      // 7. Compute Live Leaderboard
       const leaderboard = this.scoring.getLeaderboard(this.players);
       const rankMap = new Map(leaderboard.map(item => [item.id, item]));
 
@@ -279,8 +286,15 @@ export class GameManager {
   }
 
   updatePlayerMovement(player, dt) {
-    const inputX = player.input.x || 0;
-    const inputY = player.input.y || 0;
+    let inputX = player.input.x || 0;
+    let inputY = player.input.y || 0;
+
+    // Anomaly: Reverse Controls (inverts steering direction)
+    if (this.anomalies && this.anomalies.isReverseControlsActive()) {
+      inputX = -inputX;
+      inputY = -inputY;
+    }
+
     const inputMag = Math.hypot(inputX, inputY);
 
     const inRiver = this.isInRiver(player.x, player.y);
@@ -295,6 +309,12 @@ export class GameManager {
     }
 
     let currentMaxSpeed = CONFIG.PHYSICS.MAX_SPEED;
+
+    // Anomaly: Speed Surge (1.5x multiplier)
+    if (this.anomalies && this.anomalies.isSpeedSurgeActive()) {
+      currentMaxSpeed *= CONFIG.ANOMALIES.SPEED_MULTIPLIER;
+    }
+
     if (inRiver && !onBridge) {
       currentMaxSpeed *= CONFIG.PHYSICS.RIVER_SPEED_MULTIPLIER;
     }
@@ -631,9 +651,27 @@ export class GameManager {
       p: activePlayers,
       e: this.interactables.getVisibleEntities(),
       lb: leaderboard.slice(0, 5), // Top 5 leaderboard for host HUD
-      clues: this.clues ? this.clues.getPublicClueState() : null
+      clues: this.clues ? this.clues.getPublicClueState() : null,
+      anomalies: this.anomalies ? this.anomalies.getActiveState() : null
     };
 
     this.io.emit('snapshot', snapshot);
+  }
+
+  triggerDebugAnomaly(anomalyIndex) {
+    const anomalyMap = [
+      'TREASURE_RAIN',
+      'SPEED_SURGE',
+      'TELEPORT_STORM',
+      'FOG',
+      'DOUBLE_POINTS',
+      'VAULT_ACTIVATION',
+      'REVERSE_CONTROLS',
+      'GOLDEN_CROWN'
+    ];
+    const targetId = anomalyMap[anomalyIndex - 1] || 'TREASURE_RAIN';
+    if (this.anomalies && this.state === CONFIG.STATES.RUNNING) {
+      this.anomalies.activateAnomaly(targetId);
+    }
   }
 }

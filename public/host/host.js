@@ -141,11 +141,22 @@ class HostScene extends Phaser.Scene {
     this.leaderboardContainer = this.add.container(0, 0);
     this.cluesPanelContainer = this.add.container(WORLD_WIDTH - 220, 275);
     this.eventFeedContainer = this.add.container(30, WORLD_HEIGHT - 170);
+    this.anomalyContainer = this.add.container(WORLD_WIDTH / 2, 85);
+    this.crownContainer = this.add.container(0, 0);
+    this.fogGraphics = this.add.graphics();
     this.celebrationContainer = this.add.container(0, 0);
     this.poiDebugContainer = this.add.container(0, 0);
     this.lobbyContainer = this.add.container(0, 0);
     this.arenaContainer = this.add.container(0, 0);
     this.debugContainer = this.add.container(20, 20);
+
+    // Set depths
+    this.fogGraphics.setDepth(48);
+    this.crownContainer.setDepth(52);
+    this.eventFeedContainer.setDepth(60);
+    this.cluesPanelContainer.setDepth(55);
+    this.anomalyContainer.setDepth(120);
+    this.celebrationContainer.setDepth(300);
 
     // Fallback Image loader to guarantee QR image is loaded and added to textures
     const qrEndpoint = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
@@ -183,6 +194,14 @@ class HostScene extends Phaser.Scene {
     this.mKey.on('down', () => {
       showPoiDebugMarkers = !showPoiDebugMarkers;
       this.poiDebugContainer.setVisible(showPoiDebugMarkers);
+    });
+
+    // Debug Keys 1-8: Trigger specific anomalies manually
+    this.input.keyboard.on('keydown', (event) => {
+      if (event.key >= '1' && event.key <= '8') {
+        const num = parseInt(event.key, 10);
+        socket.emit('trigger_anomaly', { index: num });
+      }
     });
 
     // Socket Event: Full state update
@@ -312,7 +331,7 @@ class HostScene extends Phaser.Scene {
     bg.strokeRoundedRect(0, 0, boxW, boxH, 8);
     this.eventFeedContainer.add(bg);
 
-    const title = this.add.text(12, 10, '⚡ LIVE MATCH FEED', {
+    const title = this.add.text(12, 10, 'LIVE MATCH FEED', {
       fontFamily: 'sans-serif',
       fontSize: '11px',
       fontStyle: 'bold',
@@ -350,7 +369,7 @@ class HostScene extends Phaser.Scene {
     bg.strokeRoundedRect(0, 0, startW + 20, boxH, 8);
     this.cluesPanelContainer.add(bg);
 
-    const header = this.add.text(10, 12, `📜 KNOWN CLUES (${cluesList.length}/3)`, {
+    const header = this.add.text(10, 12, `KNOWN CLUES (${cluesList.length}/3)`, {
       fontFamily: 'sans-serif',
       fontSize: '11px',
       fontStyle: 'bold',
@@ -634,7 +653,7 @@ class HostScene extends Phaser.Scene {
     this.mapGraphics.lineStyle(2, 0x00FF66, 0.5);
     this.mapGraphics.strokeRoundedRect(40, 40, 480, 920, 16);
 
-    const forestLabel = this.add.text(280, 80, '🌲 NEON FOREST', {
+    const forestLabel = this.add.text(280, 75, 'NEON FOREST', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#00FF66',
@@ -648,7 +667,7 @@ class HostScene extends Phaser.Scene {
     this.mapGraphics.lineStyle(2, 0xFF9900, 0.5);
     this.mapGraphics.strokeRoundedRect(560, 40, 480, 400, 16);
 
-    const ruinsLabel = this.add.text(800, 75, '🏛️ ANCIENT RUINS', {
+    const ruinsLabel = this.add.text(800, 95, 'ANCIENT RUINS', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#FF9900',
@@ -662,7 +681,7 @@ class HostScene extends Phaser.Scene {
     this.mapGraphics.lineStyle(2, 0x3377FF, 0.5);
     this.mapGraphics.strokeRoundedRect(1080, 40, 480, 420, 16);
 
-    const castleLabel = this.add.text(1320, 75, '🏰 CITADEL CASTLE', {
+    const castleLabel = this.add.text(1300, 105, 'CITADEL CASTLE', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#3377FF',
@@ -676,7 +695,7 @@ class HostScene extends Phaser.Scene {
     this.mapGraphics.lineStyle(2, 0xCC00FF, 0.5);
     this.mapGraphics.strokeRoundedRect(1060, 580, 500, 380, 16);
 
-    const caveLabel = this.add.text(1310, 920, '⚡ OBSIDIAN CAVE', {
+    const caveLabel = this.add.text(1310, 925, 'OBSIDIAN CAVE', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#CC00FF',
@@ -691,7 +710,7 @@ class HostScene extends Phaser.Scene {
     this.mapGraphics.lineBetween(40, 470, 1560, 470);
     this.mapGraphics.lineBetween(40, 590, 1560, 590);
 
-    const riverLabel = this.add.text(190, 530, '🌊 CYBER RIVER [SLOWS MOVEMENT]', {
+    const riverLabel = this.add.text(210, 530, 'CYBER RIVER [SLOWS MOVEMENT]', {
       fontFamily: 'sans-serif',
       fontSize: '13px',
       fontStyle: 'bold',
@@ -756,9 +775,17 @@ class HostScene extends Phaser.Scene {
     this.wallsGraphics.strokeRect(1120, 80, 24, 120);
     this.wallsGraphics.fillRect(1120, 280, 24, 144);
     this.wallsGraphics.strokeRect(1120, 280, 24, 144);
-    // Keep
-    this.wallsGraphics.fillRect(1250, 170, 120, 120);
-    this.wallsGraphics.strokeRect(1250, 170, 120, 120);
+    // Keep chamber walls with open doorway on south
+    this.wallsGraphics.fillRect(1250, 170, 120, 18);
+    this.wallsGraphics.strokeRect(1250, 170, 120, 18);
+    this.wallsGraphics.fillRect(1250, 170, 18, 120);
+    this.wallsGraphics.strokeRect(1250, 170, 18, 120);
+    this.wallsGraphics.fillRect(1352, 170, 18, 120);
+    this.wallsGraphics.strokeRect(1352, 170, 18, 120);
+    this.wallsGraphics.fillRect(1250, 272, 40, 18);
+    this.wallsGraphics.strokeRect(1250, 272, 40, 18);
+    this.wallsGraphics.fillRect(1330, 272, 40, 18);
+    this.wallsGraphics.strokeRect(1330, 272, 40, 18);
 
     // Cave Labyrinth Walls
     this.wallsGraphics.lineStyle(2, 0xCC00FF, 0.75);
@@ -830,7 +857,7 @@ class HostScene extends Phaser.Scene {
     this.labelsContainer.add(exitZone);
 
     // 7. Match Seed Badge (Bottom Right)
-    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `SEED: #${currentGameState.seed || '000000'} | [M] POI Markers | [R] Reset`, {
+    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `SEED: #${currentGameState.seed || '000000'} | [1-8] Anomalies | [M] POIs | [R] Reset`, {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#00F0FF'
@@ -894,7 +921,7 @@ class HostScene extends Phaser.Scene {
     this.hudContainer.add(hudBox);
 
     // Large Clock Timer
-    const timerText = this.add.text(WORLD_WIDTH / 2 - 85, 50, `⏱️ ${timeFormatted}`, {
+    const timerText = this.add.text(WORLD_WIDTH / 2 - 85, 50, `TIME ${timeFormatted}`, {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '28px',
       color: isUrgent ? '#FF0055' : '#FFFFFF',
@@ -1073,7 +1100,7 @@ class HostScene extends Phaser.Scene {
     bg.strokeRoundedRect(startX - 10, startY, width + 20, 36 + leaderboard.length * 40, 10);
     this.leaderboardContainer.add(bg);
 
-    const title = this.add.text(startX + width / 2, startY + 18, '👑 LEADERBOARD', {
+    const title = this.add.text(startX + width / 2, startY + 18, 'LEADERBOARD', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '14px',
       color: '#00F0FF',
@@ -1589,6 +1616,75 @@ class HostScene extends Phaser.Scene {
     if (snapshot.clues) {
       this.drawKnownCluesPanel(snapshot.clues.knownClues, snapshot.clues.chainTitle, snapshot.clues);
     }
+
+    // Phase 8 Anomalies, Fog & Crown
+    if (snapshot.anomalies) {
+      this.renderAnomalyOverlay(snapshot.anomalies);
+      this.renderFogOfWar(snapshot.anomalies.fog);
+      this.renderGoldenCrown(snapshot.anomalies.crown);
+    } else {
+      this.anomalyContainer.removeAll(true);
+      this.fogGraphics.clear();
+      this.crownContainer.removeAll(true);
+    }
+  }
+
+  renderAnomalyOverlay(anomalyState) {
+    this.anomalyContainer.removeAll(true);
+    if (!anomalyState || !anomalyState.activeAnomalies || anomalyState.activeAnomalies.length === 0) return;
+
+    anomalyState.activeAnomalies.forEach((a, idx) => {
+      const bannerW = 420;
+      const bannerH = 44;
+      const bannerY = idx * 48;
+
+      const bg = this.add.graphics();
+      bg.fillStyle(0x0a0a22, 0.95);
+      bg.fillRoundedRect(-bannerW / 2, bannerY, bannerW, bannerH, 8);
+      const colorNum = Phaser.Display.Color.HexStringToColor(a.colorHex || '#00F0FF').color;
+      bg.lineStyle(2, colorNum, 0.9);
+      bg.strokeRoundedRect(-bannerW / 2, bannerY, bannerW, bannerH, 8);
+
+      const title = this.add.text(0, bannerY + 13, `ANOMALY: ${a.name}`, {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
+        fontSize: '14px',
+        color: a.colorHex || '#00F0FF',
+        letterSpacing: 2
+      }).setOrigin(0.5);
+
+      const sub = this.add.text(0, bannerY + 28, a.subtitle, {
+        fontFamily: 'sans-serif',
+        fontSize: '10px',
+        fontStyle: 'bold',
+        color: '#FFFFFF',
+        letterSpacing: 1
+      }).setOrigin(0.5);
+
+      this.anomalyContainer.add([bg, title, sub]);
+    });
+  }
+
+  renderFogOfWar(fogActive) {
+    this.fogGraphics.clear();
+    if (!fogActive || currentGameState.state !== 'RUNNING') return;
+
+    this.fogGraphics.fillStyle(0x050512, 0.85);
+    this.fogGraphics.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  }
+
+  renderGoldenCrown(crownState) {
+    this.crownContainer.removeAll(true);
+    if (!crownState || !crownState.active || currentGameState.state !== 'RUNNING') return;
+
+    const crown = this.add.text(crownState.x, crownState.y - 28, '👑', {
+      fontSize: '22px'
+    }).setOrigin(0.5);
+
+    const aura = this.add.graphics();
+    aura.lineStyle(2, 0xFFE600, 0.9);
+    aura.strokeCircle(crownState.x, crownState.y - 28, 16);
+
+    this.crownContainer.add([aura, crown]);
   }
 
   setupDebugOverlay() {

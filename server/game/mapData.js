@@ -7,7 +7,7 @@ export const MAP_REGIONS = [
     colorHex: '#00FF66',
     colorNum: 0x00ff66,
     bounds: { x: 40, y: 40, width: 480, height: 920 },
-    labelPos: { x: 280, y: 80 }
+    labelPos: { x: 280, y: 75 }
   },
   {
     id: 'ruins',
@@ -15,7 +15,7 @@ export const MAP_REGIONS = [
     colorHex: '#FF9900',
     colorNum: 0xff9900,
     bounds: { x: 560, y: 40, width: 480, height: 400 },
-    labelPos: { x: 800, y: 75 }
+    labelPos: { x: 800, y: 95 }
   },
   {
     id: 'castle',
@@ -23,7 +23,7 @@ export const MAP_REGIONS = [
     colorHex: '#3377FF',
     colorNum: 0x3377ff,
     bounds: { x: 1080, y: 40, width: 480, height: 420 },
-    labelPos: { x: 1320, y: 75 }
+    labelPos: { x: 1300, y: 105 }
   },
   {
     id: 'river',
@@ -31,7 +31,7 @@ export const MAP_REGIONS = [
     colorHex: '#00CCFF',
     colorNum: 0x00ccff,
     bounds: { x: 40, y: 470, width: 1520, height: 120 },
-    labelPos: { x: 190, y: 530 }
+    labelPos: { x: 210, y: 530 }
   },
   {
     id: 'cave',
@@ -39,7 +39,7 @@ export const MAP_REGIONS = [
     colorHex: '#CC00FF',
     colorNum: 0xcc00ff,
     bounds: { x: 1060, y: 580, width: 500, height: 380 },
-    labelPos: { x: 1310, y: 920 }
+    labelPos: { x: 1310, y: 925 }
   },
   {
     id: 'plaza',
@@ -101,8 +101,12 @@ export const STATIC_WALLS = [
   // West wall with West Gate gap (Gate at y: 200-280)
   { x: 1120, y: 80, width: 24, height: 120, type: 'castle', colorNum: 0x3366cc },
   { x: 1120, y: 280, width: 24, height: 144, type: 'castle', colorNum: 0x3366cc },
-  // Castle Keep inner structure
-  { x: 1250, y: 170, width: 120, height: 120, type: 'castle', colorNum: 0x4488ff },
+  // Castle Keep inner chamber walls (North, West, East, South with 40px entrance at 1290-1330)
+  { x: 1250, y: 170, width: 120, height: 18, type: 'castle', colorNum: 0x4488ff },
+  { x: 1250, y: 170, width: 18, height: 120, type: 'castle', colorNum: 0x4488ff },
+  { x: 1352, y: 170, width: 18, height: 120, type: 'castle', colorNum: 0x4488ff },
+  { x: 1250, y: 272, width: 40, height: 18, type: 'castle', colorNum: 0x4488ff },
+  { x: 1330, y: 272, width: 40, height: 18, type: 'castle', colorNum: 0x4488ff },
 
   // --- OBSIDIAN CAVE (Labyrinth Walls & Choke Points) ---
   { x: 1120, y: 640, width: 28, height: 220, type: 'cave', colorNum: 0x9900cc },

@@ -154,18 +154,30 @@ export const CONFIG = {
     RECENT_HISTORY_PENALTY: 0.35 // Multiplier on weight if template was done recently
   },
 
-  // Interaction Radii (distance in pixels)
+  // Phase 8: Anomaly Events System Configuration
+  ANOMALIES: {
+    INTERVAL_SEC: 60, // Anomaly triggers every 60 seconds
+    SPEED_MULTIPLIER: 1.5,
+    CROWN_POINTS_PER_TICK: 5,
+    CROWN_TICK_INTERVAL_SEC: 2,
+    CROWN_STEAL_PROTECTION_SEC: 3,
+    TREASURE_RAIN_COUNT: 8,
+    FOG_RADIUS: 140
+  },
+
+  // Interaction Radii (distance in pixels - requires player to be directly on/adjacent to point)
   INTERACT_RADIUS: {
-    TREASURE: 40,
-    CHEST: 48,
-    VAULT: 54,
-    KEY: 40,
-    SWITCH: 48,
-    PORTAL: 48,
-    MERCHANT: 54,
-    GLITCH: 46,
-    CLUE: 44,
-    LEGENDARY_VAULT: 56
+    TREASURE: 26, // Close contact required (player radius is 24)
+    CHEST: 34,
+    VAULT: 38,
+    KEY: 26,
+    SWITCH: 34,
+    PORTAL: 34,
+    MERCHANT: 38,
+    GLITCH: 30,
+    CLUE: 32,
+    LEGENDARY_VAULT: 40,
+    CROWN: 36
   },
 
   // Seeded POI Counts Per Match

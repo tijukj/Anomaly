@@ -5,20 +5,36 @@ export class ScoringSystem {
   constructor(io) {
     this.io = io;
     this.scoreEvents = [];
+    this.gameManager = null;
+  }
+
+  setGameManager(gm) {
+    this.gameManager = gm;
   }
 
   // Award points to a player and broadcast score popup event
   awardPoints(player, amount, reason, pos = null) {
     if (!player || amount <= 0) return 0;
 
-    player.score = (player.score || 0) + amount;
+    let finalAmount = amount;
+    let finalReason = reason || 'POINTS';
+
+    if (this.gameManager && this.gameManager.anomalies && this.gameManager.anomalies.isDoublePointsActive()) {
+      finalAmount = amount * 2;
+      finalReason = `${reason || 'POINTS'} (2X DOUBLE)`;
+      if (this.gameManager.anomalies.stats) {
+        this.gameManager.anomalies.stats.pointsUnderDouble += amount;
+      }
+    }
+
+    player.score = (player.score || 0) + finalAmount;
 
     const event = {
       id: Math.random().toString(36).substring(2, 9),
       playerId: player.id,
       playerName: player.name,
-      amount: amount,
-      reason: reason || 'POINTS',
+      amount: finalAmount,
+      reason: finalReason,
       color: player.color.hex,
       colorNum: player.color.num,
       x: pos ? pos.x : player.x,
@@ -32,7 +48,7 @@ export class ScoringSystem {
     // Broadcast floating score effect to host screen
     this.io.emit('score_popup', event);
 
-    console.log(`[Score] +${amount} to ${player.name} (${reason}) -> Total: ${player.score}`);
+    console.log(`[Score] +${finalAmount} to ${player.name} (${finalReason}) -> Total: ${player.score}`);
     return player.score;
   }
 

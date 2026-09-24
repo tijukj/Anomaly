@@ -390,6 +390,30 @@ socket.on('legendary_found', (data) => {
   }
 });
 
+// Socket Event: Anomaly Activated (Phone Alert & Warning Flash)
+socket.on('anomaly_start', (data) => {
+  const anomaly = data.anomaly;
+  if (!anomaly) return;
+
+  if (anomaly.id === 'REVERSE_CONTROLS') {
+    triggerHaptic([120, 60, 120, 60, 120]);
+    document.body.classList.add('reverse-controls-flash');
+    setTimeout(() => {
+      document.body.classList.remove('reverse-controls-flash');
+    }, 800);
+  } else {
+    triggerHaptic(80);
+  }
+
+  if (hudMission) {
+    hudMission.textContent = `🌀 ANOMALY: ${anomaly.name} (${anomaly.durationSec}s)`;
+    hudMission.style.color = anomaly.colorHex || '#FF00FF';
+    setTimeout(() => {
+      if (hudMission) hudMission.style.color = '#00F0FF';
+    }, 5000);
+  }
+});
+
 // Socket Event: Personal Player HUD (Rank, Timer, Score, Mission & Smart Button)
 socket.on('player_hud', (data) => {
   if (!data) return;

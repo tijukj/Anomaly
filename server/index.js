@@ -157,6 +157,11 @@ io.on('connection', (socket) => {
     gameManager.resetToLobby();
   });
 
+  socket.on('trigger_anomaly', (data) => {
+    const num = (data && data.index) || (typeof data === 'number' ? data : 1);
+    gameManager.triggerDebugAnomaly(num);
+  });
+
   socket.on('disconnect', () => {
     gameManager.handleDisconnect(socket.id);
   });
