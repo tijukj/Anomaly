@@ -1,9 +1,10 @@
-// server/game/gameManager.js - Authoritative game lifecycle, timeline, physics & scoring
+// server/game/gameManager.js - Authoritative game lifecycle, timeline, physics, missions & scoring
 import { CONFIG } from '../config.js';
 import { MAP_REGIONS, RIVER_ZONES, BRIDGES, STATIC_WALLS, SECRET_PASSAGE_WALL, POI_POOLS } from './mapData.js';
 import { createRng } from './seededRng.js';
 import { ScoringSystem } from './scoring.js';
 import { InteractableManager } from './interactables.js';
+import { MissionManager } from './missions.js';
 import crypto from 'crypto';
 
 export class GameManager {
@@ -19,6 +20,7 @@ export class GameManager {
     // Subsystems
     this.scoring = new ScoringSystem(io);
     this.interactables = new InteractableManager(this, this.scoring);
+    this.missions = new MissionManager(this, this.scoring);
 
     // Lifecycle & Timeline
     this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
@@ -73,6 +75,7 @@ export class GameManager {
     };
 
     this.interactables.initForMatch(this.matchSeed, this.seededPois, this.currentPhase);
+    this.missions.initForMatch(this.matchSeed);
     console.log(`[Map] Seeded Match Initialized [Seed: #${this.matchSeed}] [Duration: ${this.totalMatchDurationSec}s]`);
   }
 
@@ -117,28 +120,34 @@ export class GameManager {
       // 3. Interactables & Smart Action Button
       this.interactables.tick(activePlayerList, this.currentPhase);
 
-      // 4. Compute Live Leaderboard
+      // 4. Dynamic Missions Lifecycle
+      this.missions.tick(activePlayerList, this.matchTimeRemaining, this.totalMatchDurationSec);
+
+      // 5. Compute Live Leaderboard
       const leaderboard = this.scoring.getLeaderboard(this.players);
       const rankMap = new Map(leaderboard.map(item => [item.id, item]));
 
-      // 5. Send Contextual HUD to each Phone Controller
+      // 6. Send Contextual HUD to each Phone Controller
       for (const player of activePlayerList) {
         const socket = this.io.sockets.sockets.get(player.socketId);
         if (socket) {
           const rankInfo = rankMap.get(player.id) || { rank: 1, score: player.score || 0 };
+          const missionData = this.missions.getPlayerHudMission(player);
+
           socket.emit('player_hud', {
             rank: rankInfo.rank,
             score: player.score || 0,
             hasKey: Boolean(player.hasKey),
             timeRemaining: Math.ceil(this.matchTimeRemaining),
             phaseName: this.currentPhase.name,
-            mission: this.currentPhase.subtitle,
+            mission: missionData.text,
+            missionObj: missionData,
             actionBtn: player.smartAction || { available: false, label: 'ACTION', color: '#333344', progress: 0 }
           });
         }
       }
 
-      // 6. Broadcast 20Hz Snapshot to Host
+      // 7. Broadcast 20Hz Snapshot to Host
       this.broadcastSnapshot(leaderboard);
     }
 
@@ -181,6 +190,8 @@ export class GameManager {
       player.score = 0;
       player.hasKey = false;
       player.input = { x: 0, y: 0, action: false };
+      player.currentRegionId = 'plaza';
+      player.wasOnBridge = false;
     });
 
     this.state = CONFIG.STATES.COUNTDOWN;
@@ -205,6 +216,13 @@ export class GameManager {
   launchRunningMatch() {
     this.state = CONFIG.STATES.RUNNING;
     console.log(`[GameManager] 🏁 MATCH LAUNCHED! Duration: ${this.totalMatchDurationSec}s [Seed: #${this.matchSeed}]`);
+
+    // Assign initial mission to all active players
+    const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
+    for (const player of activePlayers) {
+      this.missions.assignMission(player, 0);
+    }
+
     this.broadcastFullState();
   }
 
@@ -246,6 +264,8 @@ export class GameManager {
       player.score = 0;
       player.hasKey = false;
       player.input = { x: 0, y: 0, action: false };
+      player.currentRegionId = 'plaza';
+      player.wasOnBridge = false;
     });
 
     console.log('[GameManager] Reset to LOBBY (All players preserved).');
@@ -259,37 +279,49 @@ export class GameManager {
 
     const inRiver = this.isInRiver(player.x, player.y);
     const onBridge = this.isOnBridge(player.x, player.y);
-    const speedMult = (inRiver && !onBridge) ? CONFIG.PHYSICS.RIVER_SPEED_MULTIPLIER : 1.0;
 
-    const maxSpeed = CONFIG.PHYSICS.MAX_SPEED * speedMult;
-    const acceleration = CONFIG.PHYSICS.ACCELERATION * speedMult;
-
-    if (inputMag > 0.01) {
-      const normX = inputX / (inputMag > 1 ? inputMag : 1);
-      const normY = inputY / (inputMag > 1 ? inputMag : 1);
-
-      player.vx += normX * acceleration * dt;
-      player.vy += normY * acceleration * dt;
-
-      const speed = Math.hypot(player.vx, player.vy);
-      if (speed > maxSpeed) {
-        player.vx = (player.vx / speed) * maxSpeed;
-        player.vy = (player.vy / speed) * maxSpeed;
-      }
+    // Mission Event: Bridge Crossing
+    if (onBridge && !player.wasOnBridge) {
+      player.wasOnBridge = true;
+      this.missions.onPlayerEvent(player, 'BRIDGE_CROSS', { bridgeId: 'bridge' });
+    } else if (!onBridge) {
+      player.wasOnBridge = false;
     }
 
+    let currentMaxSpeed = CONFIG.PHYSICS.MAX_SPEED;
+    if (inRiver && !onBridge) {
+      currentMaxSpeed *= CONFIG.PHYSICS.RIVER_SPEED_MULTIPLIER;
+    }
+
+    if (inputMag > 0.05) {
+      const dirX = inputX / inputMag;
+      const dirY = inputY / inputMag;
+      player.vx += dirX * CONFIG.PHYSICS.ACCELERATION * dt;
+      player.vy += dirY * CONFIG.PHYSICS.ACCELERATION * dt;
+    }
+
+    // Velocity Clamping
+    const speed = Math.hypot(player.vx, player.vy);
+    if (speed > currentMaxSpeed) {
+      player.vx = (player.vx / speed) * currentMaxSpeed;
+      player.vy = (player.vy / speed) * currentMaxSpeed;
+    }
+
+    // Friction / Damping
     player.vx *= CONFIG.PHYSICS.FRICTION;
     player.vy *= CONFIG.PHYSICS.FRICTION;
 
     if (Math.abs(player.vx) < 0.1) player.vx = 0;
     if (Math.abs(player.vy) < 0.1) player.vy = 0;
 
+    // Apply Position
     player.x += player.vx * dt;
     player.y += player.vy * dt;
 
+    // World Boundary Hard Clamping
     const r = CONFIG.PHYSICS.PLAYER_RADIUS;
-    player.x = Math.max(r, Math.min(CONFIG.WORLD.WIDTH - r, player.x));
-    player.y = Math.max(r, Math.min(CONFIG.WORLD.HEIGHT - r, player.y));
+    player.x = Math.max(r + 20, Math.min(CONFIG.WORLD.WIDTH - r - 20, player.x));
+    player.y = Math.max(r + 20, Math.min(CONFIG.WORLD.HEIGHT - r - 20, player.y));
   }
 
   resolveWallCollisions(player) {
@@ -386,6 +418,13 @@ export class GameManager {
       for (const region of MAP_REGIONS) {
         const b = region.bounds;
         if (player.x >= b.x && player.x <= b.x + b.width && player.y >= b.y && player.y <= b.y + b.height) {
+          // Track region entry for missions
+          if (player.currentRegionId !== region.id) {
+            player.currentRegionId = region.id;
+            this.missions.onPlayerEvent(player, 'REGION_ENTER', { regionId: region.id });
+          }
+
+          // First-time region discovery point award
           if (!this.discoveredRegions.has(region.id)) {
             this.discoveredRegions.set(region.id, {
               playerId: player.id,
@@ -478,18 +517,26 @@ export class GameManager {
         name: sanitizedName,
         color: color,
         connected: true,
-        score: 0,
-        hasKey: false,
         x: spawn.x,
         y: spawn.y,
         vx: 0,
         vy: 0,
+        score: 0,
+        hasKey: false,
         input: { x: 0, y: 0, action: false },
-        joinedAt: Date.now()
+        currentRegionId: 'plaza',
+        wasOnBridge: false
       };
 
       this.players.set(newPlayerId, player);
-      console.log(`[GameManager] New racer joined: ${player.name} (${newPlayerId}) [Color: ${color.name}]`);
+
+      // Late Joiner during running match
+      if (this.state === CONFIG.STATES.RUNNING) {
+        const elapsed = 1.0 - (this.matchTimeRemaining / this.totalMatchDurationSec);
+        this.missions.assignMission(player, elapsed);
+      }
+
+      console.log(`[GameManager] New player registered: ${player.name} (${newPlayerId})`);
     }
 
     this.socketToPlayerId.set(socket.id, player.id);
@@ -498,7 +545,8 @@ export class GameManager {
       player: {
         id: player.id,
         name: player.name,
-        color: player.color
+        color: player.color,
+        score: player.score || 0
       },
       gameState: this.state
     });
@@ -516,80 +564,62 @@ export class GameManager {
     if (player) {
       player.connected = false;
       player.input = { x: 0, y: 0, action: false };
-      player.vx = 0;
-      player.vy = 0;
       console.log(`[GameManager] Player disconnected: ${player.name} (${playerId})`);
       this.broadcastFullState();
     }
   }
 
-  getPublicState() {
+  broadcastFullState() {
+    const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
+
+    const publicState = {
+      state: this.state,
+      countdown: this.countdownRemaining,
+      timeRemaining: Math.ceil(this.matchTimeRemaining),
+      phaseIndex: this.currentPhaseIndex,
+      phase: this.currentPhase,
+      playerCount: activePlayers.length,
+      canStart: activePlayers.length >= CONFIG.MIN_PLAYERS_TO_START,
+      seed: this.matchSeed,
+      players: activePlayers.map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        score: p.score || 0,
+        hasKey: Boolean(p.hasKey)
+      }))
+    };
+
+    this.io.emit('game_state_update', publicState);
+  }
+
+  broadcastSnapshot(leaderboard) {
     const activePlayers = Array.from(this.players.values())
       .filter(p => p.connected)
       .map(p => ({
         id: p.id,
         name: p.name,
-        color: p.color,
+        colorNum: p.color.num,
+        colorHex: p.color.hex,
+        x: Math.round(p.x),
+        y: Math.round(p.y),
+        vx: Math.round(p.vx),
+        vy: Math.round(p.vy),
         score: p.score || 0,
-        hasKey: Boolean(p.hasKey),
-        x: Math.round(p.x * 10) / 10,
-        y: Math.round(p.y * 10) / 10
+        hasKey: Boolean(p.hasKey)
       }));
-
-    return {
-      state: this.state,
-      players: activePlayers,
-      playerCount: activePlayers.length,
-      minPlayers: CONFIG.MIN_PLAYERS_TO_START,
-      canStart: this.state === CONFIG.STATES.LOBBY && activePlayers.length >= CONFIG.MIN_PLAYERS_TO_START,
-      world: CONFIG.WORLD,
-      seed: this.matchSeed,
-      countdown: this.countdownRemaining,
-      timeRemaining: Math.ceil(this.matchTimeRemaining),
-      phaseIndex: this.currentPhaseIndex,
-      phase: this.currentPhase,
-      map: {
-        regions: MAP_REGIONS,
-        walls: this.activeWalls,
-        bridges: BRIDGES,
-        riverZones: RIVER_ZONES,
-        pois: this.seededPois,
-        secretDoorOpen: this.secretDoorOpen
-      }
-    };
-  }
-
-  broadcastFullState() {
-    this.io.emit('game_state_update', this.getPublicState());
-  }
-
-  broadcastSnapshot(leaderboard = []) {
-    const activePlayers = [];
-    for (const p of this.players.values()) {
-      if (p.connected) {
-        activePlayers.push({
-          id: p.id,
-          x: Math.round(p.x * 10) / 10,
-          y: Math.round(p.y * 10) / 10,
-          s: p.score || 0,
-          k: p.hasKey ? 1 : 0,
-          a: p.input.action ? 1 : 0
-        });
-      }
-    }
 
     const snapshot = {
       t: Date.now(),
-      tickTime: Math.round(this.lastTickComputationMs * 100) / 100,
-      timeRemaining: Math.ceil(this.matchTimeRemaining),
-      phaseIndex: this.currentPhaseIndex,
-      phase: this.currentPhase,
+      st: Math.round(this.lastTickComputationMs * 100) / 100,
+      tr: Math.ceil(this.matchTimeRemaining),
+      pi: this.currentPhaseIndex,
+      sd: this.secretDoorOpen,
       p: activePlayers,
-      ent: this.interactables.getVisibleEntities(),
-      lb: leaderboard.slice(0, 5),
-      doorOpen: this.secretDoorOpen
+      e: this.interactables.getVisibleEntities(),
+      lb: leaderboard.slice(0, 5) // Top 5 leaderboard for host HUD
     };
 
-    this.io.emit('tick_snapshot', snapshot);
+    this.io.emit('snapshot', snapshot);
   }
 }

@@ -318,6 +318,24 @@ socket.on('countdown_tick', (data) => {
   }
 });
 
+// Socket Event: Mission Completed (Flash screen & vibration)
+socket.on('mission_completed', (data) => {
+  triggerHaptic([100, 50, 100]);
+
+  document.body.classList.add('mission-complete-flash');
+  setTimeout(() => {
+    document.body.classList.remove('mission-complete-flash');
+  }, 600);
+
+  if (hudMission) {
+    hudMission.textContent = `✓ COMPLETED: "${data.title}" (+${data.reward} PTS)!`;
+    hudMission.style.color = '#39FF14';
+    setTimeout(() => {
+      if (hudMission) hudMission.style.color = '#00F0FF';
+    }, (data.nextInSec || 3) * 1000);
+  }
+});
+
 // Socket Event: Personal Player HUD (Rank, Timer, Score, Mission & Smart Button)
 socket.on('player_hud', (data) => {
   if (!data) return;

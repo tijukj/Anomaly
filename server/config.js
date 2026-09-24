@@ -88,6 +88,7 @@ export const CONFIG = {
     TREASURE_COMMON: 5,
     TREASURE_RARE: 15,
     TREASURE_EPIC: 30,
+    TREASURE_GLITCH: 40,
     CHEST_MIN: 10,
     CHEST_MAX: 35,
     VAULT: 50,
@@ -100,6 +101,43 @@ export const CONFIG = {
     TREASURE_RESPAWN_MS: 7000
   },
 
+  // Dynamic Transient / Glitch Treasures (Random appearance for a few seconds)
+  GLITCH_TREASURE: {
+    DURATION_SEC: 10, // Stays active for 10 seconds before vanishing
+    SPAWN_INTERVAL_SEC: 35, // Spawns a new one every 35 seconds
+    RADIUS: 46,
+    COLOR_HEX: '#FF00FF',
+    COLOR_NUM: 0xff00ff,
+    POINTS: 40
+  },
+
+  // Phase 6: Dynamic Mission System Configuration
+  MISSIONS: {
+    NEW_MISSION_DELAY_SEC: 3, // Delay before assigning next mission after completion
+    RUNNER_TIME_LIMIT_FRACTION: 0.5, // Runner mission must be completed in first half of match (e.g. before 5:00)
+    REWARDS: {
+      EXPLORER: 25,
+      COLLECTOR: 35,
+      RUNNER: 40,
+      OPPORTUNIST: 50,
+      COMMON_HOARDER: 20,
+      PORTAL_JUMPER: 25,
+      BRIDGE_CROSSER: 20,
+      MERCHANT_DEAL: 30
+    },
+    BASE_WEIGHTS: {
+      EXPLORER: 1.0,
+      COLLECTOR: 1.0,
+      RUNNER: 0.8,
+      OPPORTUNIST: 1.2,
+      COMMON_HOARDER: 1.0,
+      PORTAL_JUMPER: 0.9,
+      BRIDGE_CROSSER: 1.0,
+      MERCHANT_DEAL: 0.9
+    },
+    RECENT_HISTORY_PENALTY: 0.35 // Multiplier on weight if template was done recently
+  },
+
   // Interaction Radii (distance in pixels)
   INTERACT_RADIUS: {
     TREASURE: 40,
@@ -108,7 +146,8 @@ export const CONFIG = {
     KEY: 40,
     SWITCH: 48,
     PORTAL: 48,
-    MERCHANT: 54
+    MERCHANT: 54,
+    GLITCH: 46
   },
 
   // Seeded POI Counts Per Match

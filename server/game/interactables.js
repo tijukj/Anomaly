@@ -1,7 +1,21 @@
-// server/game/interactables.js - Server-authoritative interactable entity manager with phase-weighted spawns
+// server/game/interactables.js - Server-authoritative interactables, transient glitch treasures & mission triggers
 import { CONFIG } from '../config.js';
 import { POI_POOLS } from './mapData.js';
 import { createRng } from './seededRng.js';
+
+// Candidate spots for transient glitch treasures across regions
+const GLITCH_SPOTS = [
+  { x: 380, y: 150, region: 'forest' },
+  { x: 200, y: 490, region: 'forest' },
+  { x: 740, y: 220, region: 'ruins' },
+  { x: 880, y: 340, region: 'ruins' },
+  { x: 1380, y: 230, region: 'castle' },
+  { x: 1220, y: 140, region: 'castle' },
+  { x: 1280, y: 880, region: 'cave' },
+  { x: 1420, y: 680, region: 'cave' },
+  { x: 600, y: 530, region: 'river' },
+  { x: 1050, y: 530, region: 'river' }
+];
 
 export class InteractableManager {
   constructor(gameManager, scoring) {
@@ -9,6 +23,8 @@ export class InteractableManager {
     this.scoring = scoring;
     this.entities = new Map();
     this.rng = createRng(12345);
+    this.activeGlitch = null;
+    this.nextGlitchSpawnAt = 0;
   }
 
   // Pick treasure tier based on current match phase spawn table
@@ -31,6 +47,8 @@ export class InteractableManager {
   initForMatch(seed, seededPois, initialPhase) {
     this.entities.clear();
     this.rng = createRng(seed);
+    this.activeGlitch = null;
+    this.nextGlitchSpawnAt = Date.now() + 15000; // First glitch appears 15s after match start
 
     // 1. Treasures with Phase 1 initial tiers
     for (const t of (seededPois.treasures || [])) {
@@ -157,11 +175,11 @@ export class InteractableManager {
     console.log(`[Interactables] Initialized ${this.entities.size} interactive entities for match.`);
   }
 
-  // 20Hz Tick: Process respawns using phase weights and update player prompts
+  // 20Hz Tick: Process respawns, glitch treasures and update player prompts
   tick(activePlayers, currentPhase) {
     const now = Date.now();
 
-    // 1. Process Respawns with current phase weights
+    // 1. Process Standard Respawns with current phase weights
     for (const ent of this.entities.values()) {
       if (ent.state === 'collected' || ent.state === 'opened') {
         if (ent.respawnAt && now >= ent.respawnAt) {
@@ -175,9 +193,55 @@ export class InteractableManager {
       }
     }
 
-    // 2. Compute Smart Action Button & Process Interactions per player
+    // 2. Process Transient Glitch / Anomaly Treasure Lifecycle
+    this.tickGlitchTreasure(now);
+
+    // 3. Compute Smart Action Button & Process Interactions per player
     for (const player of activePlayers) {
       this.processPlayerInteractions(player, now);
+    }
+  }
+
+  tickGlitchTreasure(now) {
+    // Spawn new glitch treasure if timer reached and none active
+    if (!this.activeGlitch && this.nextGlitchSpawnAt && now >= this.nextGlitchSpawnAt) {
+      const spot = this.rng.pick(GLITCH_SPOTS, 1)[0];
+      this.activeGlitch = {
+        id: `glitch_${Date.now().toString(36)}`,
+        type: 'glitch',
+        regionName: spot.region.toUpperCase(),
+        x: spot.x,
+        y: spot.y,
+        radius: CONFIG.INTERACT_RADIUS.GLITCH,
+        points: CONFIG.GLITCH_TREASURE.POINTS,
+        colorHex: CONFIG.GLITCH_TREASURE.COLOR_HEX,
+        colorNum: CONFIG.GLITCH_TREASURE.COLOR_NUM,
+        state: 'active',
+        spawnedAt: now,
+        expiresAt: now + (CONFIG.GLITCH_TREASURE.DURATION_SEC * 1000),
+        durationSec: CONFIG.GLITCH_TREASURE.DURATION_SEC
+      };
+
+      this.entities.set(this.activeGlitch.id, this.activeGlitch);
+
+      this.gameManager.io.emit('host_event', {
+        id: Math.random().toString(36).substring(2, 9),
+        type: 'glitch_spawn',
+        text: `⚡ GLITCH TREASURE spawned in ${spot.region.toUpperCase()}! (10s)`,
+        colorHex: CONFIG.GLITCH_TREASURE.COLOR_HEX,
+        timestamp: now
+      });
+
+      console.log(`[Interactables] ⚡ Glitch Treasure spawned at (${spot.x}, ${spot.y}) in ${spot.region}!`);
+    }
+
+    // Check if active glitch treasure has expired or was collected
+    if (this.activeGlitch) {
+      if (this.activeGlitch.state === 'collected' || now >= this.activeGlitch.expiresAt) {
+        this.entities.delete(this.activeGlitch.id);
+        this.activeGlitch = null;
+        this.nextGlitchSpawnAt = now + (CONFIG.GLITCH_TREASURE.SPAWN_INTERVAL_SEC * 1000);
+      }
     }
   }
 
@@ -224,6 +288,16 @@ export class InteractableManager {
           color: ent.colorHex,
           progress: 0
         };
+
+      case 'glitch': {
+        const remSec = Math.max(0, Math.ceil((ent.expiresAt - now) / 1000));
+        return {
+          available: true,
+          label: `RUSH (+${ent.points}) [${remSec}s] ⚡`,
+          color: ent.colorHex,
+          progress: 0
+        };
+      }
 
       case 'chest': {
         const holdStart = ent.holdingPlayers ? ent.holdingPlayers.get(player.id) : null;
@@ -324,6 +398,29 @@ export class InteractableManager {
         ent.state = 'collected';
         ent.respawnAt = now + CONFIG.SCORING.TREASURE_RESPAWN_MS;
         this.scoring.awardPoints(player, ent.points, `${ent.tier.toUpperCase()} TREASURE`, { x: ent.x, y: ent.y });
+        
+        // Notify Mission System
+        if (this.gameManager.missions) {
+          this.gameManager.missions.onPlayerEvent(player, 'TREASURE_COLLECT', { tier: ent.tier, isGlitch: false });
+        }
+        break;
+
+      case 'glitch':
+        ent.state = 'collected';
+        this.scoring.awardPoints(player, ent.points, 'GLITCH TREASURE', { x: ent.x, y: ent.y });
+        
+        // Notify Mission System (Opportunist)
+        if (this.gameManager.missions) {
+          this.gameManager.missions.onPlayerEvent(player, 'TREASURE_COLLECT', { tier: 'glitch', isGlitch: true });
+        }
+
+        this.gameManager.io.emit('host_event', {
+          id: Math.random().toString(36).substring(2, 9),
+          type: 'glitch_collected',
+          text: `⚡ ${player.name} grabbed the Glitch Treasure! (+${ent.points} pts)`,
+          colorHex: player.color.hex,
+          timestamp: now
+        });
         break;
 
       case 'chest':
@@ -337,6 +434,11 @@ export class InteractableManager {
             ent.holdingPlayers.clear();
             const reward = this.rng.rangeInt(CONFIG.SCORING.CHEST_MIN, CONFIG.SCORING.CHEST_MAX);
             this.scoring.awardPoints(player, reward, 'SECRET CHEST', { x: ent.x, y: ent.y });
+
+            // Notify Mission System (Collector)
+            if (this.gameManager.missions) {
+              this.gameManager.missions.onPlayerEvent(player, 'CHEST_OPEN', { chestId: ent.id });
+            }
           }
         }
         break;
@@ -345,7 +447,14 @@ export class InteractableManager {
         ent.state = 'collected';
         player.hasKey = true;
         this.scoring.awardPoints(player, 5, 'VAULT KEY FOUND', { x: ent.x, y: ent.y });
-        console.log(`[Item] 🔑 Racer ${player.name} picked up a VAULT KEY!`);
+        
+        this.gameManager.io.emit('host_event', {
+          id: Math.random().toString(36).substring(2, 9),
+          type: 'key_found',
+          text: `🔑 ${player.name} obtained a Citadel Key!`,
+          colorHex: player.color.hex,
+          timestamp: now
+        });
         break;
 
       case 'vault':
@@ -353,6 +462,14 @@ export class InteractableManager {
           ent.state = 'opened';
           player.hasKey = false;
           this.scoring.awardPoints(player, CONFIG.SCORING.VAULT, 'VAULT UNLOCKED', { x: ent.x, y: ent.y });
+
+          this.gameManager.io.emit('host_event', {
+            id: Math.random().toString(36).substring(2, 9),
+            type: 'vault_opened',
+            text: `🔓 ${player.name} unlocked the ${ent.name || 'Vault'}! (+${CONFIG.SCORING.VAULT} pts)`,
+            colorHex: player.color.hex,
+            timestamp: now
+          });
         }
         break;
 
@@ -364,6 +481,11 @@ export class InteractableManager {
           player.vy = 0;
           player.portalCooldownUntil = now + (CONFIG.SCORING.PORTAL_COOLDOWN_SEC * 1000);
           this.scoring.awardPoints(player, 5, 'PORTAL WARP', { x: player.x, y: player.y });
+
+          // Notify Mission System (Portal Jumper)
+          if (this.gameManager.missions) {
+            this.gameManager.missions.onPlayerEvent(player, 'PORTAL_USE', { portalId: ent.id });
+          }
         }
         break;
 
@@ -372,6 +494,11 @@ export class InteractableManager {
           player.merchantCooldownUntil = now + (CONFIG.SCORING.MERCHANT_COOLDOWN_SEC * 1000);
           const payout = this.rng.rangeInt(CONFIG.SCORING.MERCHANT_MIN, CONFIG.SCORING.MERCHANT_MAX);
           this.scoring.awardPoints(player, payout, 'MERCHANT DEAL', { x: ent.x, y: ent.y });
+
+          // Notify Mission System (Merchant Deal)
+          if (this.gameManager.missions) {
+            this.gameManager.missions.onPlayerEvent(player, 'MERCHANT_TRADE', { merchantId: ent.id });
+          }
         }
         break;
 
@@ -380,7 +507,14 @@ export class InteractableManager {
           this.gameManager.secretDoorOpen = true;
           this.gameManager.activeWalls = this.gameManager.activeWalls.filter(w => w.id !== 'secret_door');
           this.scoring.awardPoints(player, 25, 'SECRET PASSAGE UNLOCKED', { x: ent.x, y: ent.y });
-          console.log(`[Map] ⚡ SECRET PASSAGE UNLOCKED by ${player.name}!`);
+
+          this.gameManager.io.emit('host_event', {
+            id: Math.random().toString(36).substring(2, 9),
+            type: 'secret_passage',
+            text: `⚡ ${player.name} opened the Citadel Secret Passage!`,
+            colorHex: player.color.hex,
+            timestamp: now
+          });
         }
         break;
     }
@@ -394,9 +528,13 @@ export class InteractableManager {
       x: e.x,
       y: e.y,
       radius: e.radius,
+      points: e.points,
       colorHex: e.colorHex,
       colorNum: e.colorNum,
-      state: e.state
+      state: e.state,
+      spawnedAt: e.spawnedAt,
+      expiresAt: e.expiresAt,
+      durationSec: e.durationSec
     }));
   }
 }
