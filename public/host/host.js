@@ -80,6 +80,13 @@ class HostScene extends Phaser.Scene {
   preload() {
     const qrEndpoint = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
     this.load.image('qrcode', qrEndpoint);
+
+    // If texture finishes loading via Phaser loader, update lobby if active
+    this.load.once('filecomplete-image-qrcode', () => {
+      if (currentGameState.state === 'LOBBY') {
+        this.renderLobbyUI();
+      }
+    });
   }
 
   create() {
@@ -104,19 +111,20 @@ class HostScene extends Phaser.Scene {
     this.arenaContainer = this.add.container(0, 0);
     this.debugContainer = this.add.container(20, 20);
 
-    // Fallback image loader to guarantee QR visibility
+    // Fallback Image loader to guarantee QR image is loaded and added to textures
+    const qrEndpoint = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
     if (!this.textures.exists('qrcode')) {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         if (!this.textures.exists('qrcode')) {
           this.textures.addImage('qrcode', img);
-          if (currentGameState.state === 'LOBBY') {
-            this.renderLobbyUI();
-          }
+        }
+        if (currentGameState.state === 'LOBBY') {
+          this.renderLobbyUI();
         }
       };
-      img.src = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
+      img.src = qrEndpoint;
     }
 
     // Keyboard controls
@@ -1296,6 +1304,22 @@ class HostScene extends Phaser.Scene {
       const qrSprite = this.add.image(leftX, leftY + 40, 'qrcode');
       qrSprite.setDisplaySize(200, 200);
       this.lobbyContainer.add(qrSprite);
+    } else {
+      const loadingQr = this.add.text(leftX, leftY + 40, 'GENERATING\nQR CODE...', {
+        fontFamily: 'sans-serif',
+        fontSize: '13px',
+        fontStyle: 'bold',
+        color: '#050515',
+        align: 'center'
+      }).setOrigin(0.5);
+      this.lobbyContainer.add(loadingQr);
+
+      // Retry render in 300ms if not ready yet
+      this.time.delayedCall(300, () => {
+        if (currentGameState.state === 'LOBBY' && this.textures.exists('qrcode')) {
+          this.renderLobbyUI();
+        }
+      });
     }
 
     const orText = this.add.text(leftX, leftY + 165, 'OR VISIT IN BROWSER', {

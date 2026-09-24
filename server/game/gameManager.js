@@ -575,10 +575,9 @@ export class GameManager {
     }
   }
 
-  broadcastFullState() {
+  getPublicState() {
     const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
-
-    const publicState = {
+    return {
       state: this.state,
       countdown: this.countdownRemaining,
       timeRemaining: Math.ceil(this.matchTimeRemaining),
@@ -596,8 +595,10 @@ export class GameManager {
         hasKey: Boolean(p.hasKey)
       }))
     };
+  }
 
-    this.io.emit('game_state_update', publicState);
+  broadcastFullState() {
+    this.io.emit('game_state_update', this.getPublicState());
   }
 
   broadcastSnapshot(leaderboard) {
