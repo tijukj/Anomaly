@@ -1,0 +1,17 @@
+{
+  "name": "anomaly",
+  "version": "1.0.0",
+  "description": "ANOMALY: Real-time multiplayer treasure race game",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "phaser": "^3.88.2",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1"
+  }
+}

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#070714">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>ANOMALY // Controller</title>
+  <link rel="stylesheet" href="/play/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- View 1: Join Screen -->
+    <div id="join-view" class="view active">
+      <div class="logo-badge">ANOMALY</div>
+      <h1 class="title">PLAYER ACCESS</h1>
+      <p class="subtitle">Enter your racer handle</p>
+
+      <form id="join-form">
+        <div class="input-group">
+          <input 
+            type="text" 
+            id="player-name-input" 
+            maxlength="12" 
+            placeholder="RACER NAME" 
+            autocomplete="off" 
+            autocorrect="off" 
+            autocapitalize="characters" 
+            spellcheck="false" 
+            required 
+          />
+          <div class="char-count"><span id="char-count">0</span>/12</div>
+        </div>
+        <button type="submit" id="join-btn" class="glow-btn">ENTER MATCH</button>
+      </form>
+      <div id="error-msg" class="error-msg"></div>
+    </div>
+
+    <!-- View 2: Lobby Waiting Screen -->
+    <div id="lobby-view" class="view">
+      <div class="player-pill">
+        <div class="player-dot" id="lobby-player-dot"></div>
+        <div class="player-name-display" id="lobby-player-name">---</div>
+      </div>
+      
+      <div class="status-box">
+        <div class="pulse-ring"></div>
+        <h2 class="status-title">YOU'RE IN!</h2>
+        <p class="status-sub">Waiting for host to start match...</p>
+      </div>
+
+      <div class="footer-tip">Keep this screen open</div>
+    </div>
+
+    <!-- View 3: Running Screen -->
+    <div id="running-view" class="view">
+      <div class="player-pill">
+        <div class="player-dot" id="running-player-dot"></div>
+        <div class="player-name-display" id="running-player-name">---</div>
+      </div>
+
+      <div class="status-box running-box">
+        <h1 class="running-title">MATCH RUNNING</h1>
+        <p class="running-sub">Look at the big screen!</p>
+      </div>
+
+      <div class="controller-placeholder">
+        <div class="radar-scan"></div>
+        <div class="hud-status">CONTROLLER SYNCED</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/play/play.js"></script>
+</body>
+</html>
