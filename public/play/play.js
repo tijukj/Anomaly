@@ -8,26 +8,38 @@ const STORAGE_KEYS = {
   PLAYER_NAME: 'anomaly_player_name'
 };
 
-// DOM Elements
+// DOM Elements - Views
 const joinView = document.getElementById('join-view');
 const lobbyView = document.getElementById('lobby-view');
 const runningView = document.getElementById('running-view');
+const endedView = document.getElementById('ended-view');
 
+// Overlay Elements
+const countdownOverlay = document.getElementById('countdown-overlay');
+const countdownNum = document.getElementById('countdown-num');
+
+// Form Elements
 const joinForm = document.getElementById('join-form');
 const nameInput = document.getElementById('player-name-input');
 const charCount = document.getElementById('char-count');
 const errorMsg = document.getElementById('error-msg');
 
+// Lobby & Player Badges
 const lobbyPlayerDot = document.getElementById('lobby-player-dot');
 const lobbyPlayerName = document.getElementById('lobby-player-name');
 const runningPlayerDot = document.getElementById('running-player-dot');
 const runningPlayerName = document.getElementById('running-player-name');
 
-// HUD Elements
+// Running HUD Elements
 const hudRank = document.getElementById('hud-rank');
+const hudTimer = document.getElementById('hud-timer');
 const hudScore = document.getElementById('hud-score');
 const hudKeyBadge = document.getElementById('hud-key-badge');
 const hudMission = document.getElementById('hud-mission');
+
+// Ended View Elements
+const endedRank = document.getElementById('ended-rank');
+const endedScore = document.getElementById('ended-score');
 
 // Controller Elements
 const joystickZone = document.getElementById('joystick-zone');
@@ -78,24 +90,42 @@ nameInput.addEventListener('input', () => {
   charCount.textContent = nameInput.value.length;
 });
 
+function formatTime(totalSeconds) {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
 function showView(viewId) {
-  [joinView, lobbyView, runningView].forEach(v => v.classList.remove('active'));
-  if (viewId === 'join') joinView.classList.add('active');
-  if (viewId === 'lobby') lobbyView.classList.add('active');
-  if (viewId === 'running') runningView.classList.add('active');
+  [joinView, lobbyView, runningView, endedView].forEach(v => {
+    if (v) v.classList.remove('active');
+  });
+
+  if (viewId === 'join' && joinView) joinView.classList.add('active');
+  if (viewId === 'lobby' && lobbyView) lobbyView.classList.add('active');
+  if (viewId === 'running' && runningView) runningView.classList.add('active');
+  if (viewId === 'ended' && endedView) endedView.classList.add('active');
 }
 
 function applyPlayerTheme(player) {
   if (!player || !player.color) return;
   document.documentElement.style.setProperty('--player-theme-color', player.color.hex);
   
-  lobbyPlayerDot.style.backgroundColor = player.color.hex;
-  lobbyPlayerDot.style.boxShadow = `0 0 10px ${player.color.hex}`;
-  lobbyPlayerName.textContent = player.name;
+  if (lobbyPlayerDot) {
+    lobbyPlayerDot.style.backgroundColor = player.color.hex;
+    lobbyPlayerDot.style.boxShadow = `0 0 10px ${player.color.hex}`;
+  }
+  if (lobbyPlayerName) {
+    lobbyPlayerName.textContent = player.name;
+  }
 
-  runningPlayerDot.style.backgroundColor = player.color.hex;
-  runningPlayerDot.style.boxShadow = `0 0 10px ${player.color.hex}`;
-  runningPlayerName.textContent = player.name;
+  if (runningPlayerDot) {
+    runningPlayerDot.style.backgroundColor = player.color.hex;
+    runningPlayerDot.style.boxShadow = `0 0 10px ${player.color.hex}`;
+  }
+  if (runningPlayerName) {
+    runningPlayerName.textContent = player.name;
+  }
 }
 
 // -------------------------------------------------------------
@@ -179,9 +209,9 @@ joystickZone.addEventListener('touchcancel', resetJoystick);
 // -------------------------------------------------------------
 // Smart Action Button Handlers
 // -------------------------------------------------------------
-function triggerHaptic() {
+function triggerHaptic(duration = 40) {
   if (navigator.vibrate) {
-    try { navigator.vibrate(40); } catch (e) {}
+    try { navigator.vibrate(duration); } catch (e) {}
   }
 }
 
@@ -189,7 +219,7 @@ actionBtn.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   actionBtn.classList.add('pressed');
   currentInput.action = true;
-  triggerHaptic();
+  triggerHaptic(50);
   transmitInputIfChanged(true);
 });
 
@@ -261,26 +291,53 @@ socket.on('joined_success', (data) => {
 
   if (currentGameState === 'RUNNING') {
     showView('running');
+    if (countdownOverlay) countdownOverlay.classList.add('hidden');
+  } else if (currentGameState === 'COUNTDOWN') {
+    showView('running');
+    if (countdownOverlay) countdownOverlay.classList.remove('hidden');
+  } else if (currentGameState === 'ENDED') {
+    showView('ended');
+    if (countdownOverlay) countdownOverlay.classList.add('hidden');
   } else {
     showView('lobby');
+    if (countdownOverlay) countdownOverlay.classList.add('hidden');
   }
 });
 
-// Socket Event: Personal Player HUD (Rank, Score, Mission & Smart Button)
+// Socket Event: Countdown Tick (5..4..3..2..1)
+socket.on('countdown_tick', (data) => {
+  if (countdownOverlay && countdownNum) {
+    if (data.count > 0) {
+      countdownOverlay.classList.remove('hidden');
+      countdownNum.textContent = data.count;
+      triggerHaptic(80);
+    } else {
+      countdownOverlay.classList.add('hidden');
+      triggerHaptic(150);
+    }
+  }
+});
+
+// Socket Event: Personal Player HUD (Rank, Timer, Score, Mission & Smart Button)
 socket.on('player_hud', (data) => {
   if (!data) return;
 
   // Update Rank & Score
-  hudRank.textContent = `#${data.rank || 1}`;
-  hudScore.textContent = `${data.score || 0}`;
+  if (hudRank) hudRank.textContent = `#${data.rank || 1}`;
+  if (hudScore) hudScore.textContent = `${data.score || 0}`;
 
-  if (data.hasKey) {
-    hudKeyBadge.classList.remove('hidden');
-  } else {
-    hudKeyBadge.classList.add('hidden');
+  // Update Match Timer
+  if (hudTimer && data.timeRemaining !== undefined) {
+    hudTimer.textContent = formatTime(data.timeRemaining);
   }
 
-  if (data.mission) {
+  if (data.hasKey) {
+    if (hudKeyBadge) hudKeyBadge.classList.remove('hidden');
+  } else {
+    if (hudKeyBadge) hudKeyBadge.classList.add('hidden');
+  }
+
+  if (data.mission && hudMission) {
     hudMission.textContent = data.mission;
   }
 
@@ -299,20 +356,46 @@ socket.on('player_hud', (data) => {
   }
 });
 
+// Socket Event: Match Ended (Podium & Final Result)
+socket.on('match_ended', (data) => {
+  currentGameState = 'ENDED';
+  if (countdownOverlay) countdownOverlay.classList.add('hidden');
+  
+  if (localPlayer && data && data.leaderboard) {
+    const myEntry = data.leaderboard.find(p => p.id === localPlayer.id);
+    if (myEntry) {
+      if (endedRank) endedRank.textContent = `#${myEntry.rank}`;
+      if (endedScore) endedScore.textContent = `${myEntry.score} PTS`;
+    }
+  }
+
+  showView('ended');
+  triggerHaptic(200);
+});
+
+// Socket Event: Global Game State Updates
 socket.on('game_state_update', (publicState) => {
   currentGameState = publicState.state;
 
   if (localPlayer) {
     if (currentGameState === 'RUNNING') {
       showView('running');
+      if (countdownOverlay) countdownOverlay.classList.add('hidden');
+    } else if (currentGameState === 'COUNTDOWN') {
+      showView('running');
+      if (countdownOverlay) countdownOverlay.classList.remove('hidden');
+    } else if (currentGameState === 'ENDED') {
+      showView('ended');
+      if (countdownOverlay) countdownOverlay.classList.add('hidden');
     } else if (currentGameState === 'LOBBY') {
       showView('lobby');
+      if (countdownOverlay) countdownOverlay.classList.add('hidden');
     }
   }
 });
 
 socket.on('error_message', (data) => {
-  errorMsg.textContent = data.message || 'Error occurred';
+  if (errorMsg) errorMsg.textContent = data.message || 'Error occurred';
 });
 
 // Auto-reconnect on load
@@ -320,9 +403,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedId = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
   const savedName = localStorage.getItem(STORAGE_KEYS.PLAYER_NAME);
 
-  if (savedName) {
+  if (savedName && nameInput) {
     nameInput.value = savedName;
-    charCount.textContent = savedName.length;
+    if (charCount) charCount.textContent = savedName.length;
   }
 
   if (savedId && savedName) {

@@ -1,4 +1,4 @@
-// server/game/gameManager.js - Authoritative game physics, collision, map regions, interactables & scoring
+// server/game/gameManager.js - Authoritative game lifecycle, timeline, physics & scoring
 import { CONFIG } from '../config.js';
 import { MAP_REGIONS, RIVER_ZONES, BRIDGES, STATIC_WALLS, SECRET_PASSAGE_WALL, POI_POOLS } from './mapData.js';
 import { createRng } from './seededRng.js';
@@ -10,8 +10,8 @@ export class GameManager {
   constructor(io) {
     this.io = io;
     this.state = CONFIG.STATES.LOBBY;
-    this.players = new Map(); // playerId -> Player Object
-    this.socketToPlayerId = new Map(); // socketId -> playerId
+    this.players = new Map();
+    this.socketToPlayerId = new Map();
     this.colorIndex = 0;
     this.tickInterval = null;
     this.lastTickComputationMs = 0;
@@ -20,13 +20,19 @@ export class GameManager {
     this.scoring = new ScoringSystem(io);
     this.interactables = new InteractableManager(this, this.scoring);
 
-    // Match Seed & Map state
+    // Lifecycle & Timeline
+    this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
+    this.matchTimeRemaining = this.totalMatchDurationSec;
+    this.countdownRemaining = CONFIG.COUNTDOWN_DURATION_SEC;
+    this.countdownInterval = null;
+    this.currentPhaseIndex = 0;
+    this.currentPhase = CONFIG.PHASES[0];
+
+    // Map & Seed state
     this.matchSeed = Math.floor(Math.random() * 900000) + 100000;
     this.seededPois = null;
     this.secretDoorOpen = false;
     this.activeWalls = [...STATIC_WALLS, SECRET_PASSAGE_WALL];
-
-    // Discovery Tracking per region (First player to enter)
     this.discoveredRegions = new Map();
 
     this.initSeededMap();
@@ -40,6 +46,10 @@ export class GameManager {
     this.secretDoorOpen = false;
     this.activeWalls = [...STATIC_WALLS, SECRET_PASSAGE_WALL];
     this.discoveredRegions.clear();
+    this.currentPhaseIndex = 0;
+    this.currentPhase = CONFIG.PHASES[0];
+    this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
+    this.matchTimeRemaining = this.totalMatchDurationSec;
 
     const selectedTreasures = rng.pick(POI_POOLS.treasures, CONFIG.POI_COUNTS.TREASURES);
     const selectedChests = rng.pick(POI_POOLS.chests, CONFIG.POI_COUNTS.CHESTS);
@@ -62,8 +72,8 @@ export class GameManager {
       merchants: selectedMerchants
     };
 
-    this.interactables.initForMatch(this.matchSeed, this.seededPois);
-    console.log(`[Map] Initialized Seeded Match Layout [Seed: #${this.matchSeed}]`);
+    this.interactables.initForMatch(this.matchSeed, this.seededPois, this.currentPhase);
+    console.log(`[Map] Seeded Match Initialized [Seed: #${this.matchSeed}] [Duration: ${this.totalMatchDurationSec}s]`);
   }
 
   startTickLoop() {
@@ -78,32 +88,40 @@ export class GameManager {
     const dt = CONFIG.TICK_INTERVAL_MS / 1000;
 
     if (this.state === CONFIG.STATES.RUNNING) {
+      // 1. Update Match Timeline
+      this.matchTimeRemaining = Math.max(0, this.matchTimeRemaining - dt);
+      const elapsedFraction = 1.0 - (this.matchTimeRemaining / this.totalMatchDurationSec);
+
+      // Check Phase Transition
+      this.updateMatchPhase(elapsedFraction);
+
+      // Check Match End
+      if (this.matchTimeRemaining <= 0) {
+        this.endMatch();
+      }
+
       const activePlayerList = Array.from(this.players.values()).filter(p => p.connected);
 
-      // 1. Authoritative movement and physics
+      // 2. Authoritative physics & collisions
       for (const player of activePlayerList) {
         this.updatePlayerMovement(player, dt);
       }
 
-      // 2. Wall collisions with smooth sliding response
       for (const player of activePlayerList) {
         this.resolveWallCollisions(player);
       }
 
-      // 3. Soft Player-vs-Player body-blocking (pushing)
       this.resolvePlayerCollisions(activePlayerList);
-
-      // 4. Region Entry & First Discovery tracking
       this.checkRegionDiscoveries(activePlayerList);
 
-      // 5. Interactables & Smart Action Button Processing
-      this.interactables.tick(activePlayerList);
+      // 3. Interactables & Smart Action Button
+      this.interactables.tick(activePlayerList, this.currentPhase);
 
-      // 6. Compute Live Leaderboard
+      // 4. Compute Live Leaderboard
       const leaderboard = this.scoring.getLeaderboard(this.players);
       const rankMap = new Map(leaderboard.map(item => [item.id, item]));
 
-      // 7. Send Contextual HUD to each Phone Player
+      // 5. Send Contextual HUD to each Phone Controller
       for (const player of activePlayerList) {
         const socket = this.io.sockets.sockets.get(player.socketId);
         if (socket) {
@@ -112,17 +130,126 @@ export class GameManager {
             rank: rankInfo.rank,
             score: player.score || 0,
             hasKey: Boolean(player.hasKey),
-            mission: 'RACE FOR TREASURE & DISCOVER REGIONS',
+            timeRemaining: Math.ceil(this.matchTimeRemaining),
+            phaseName: this.currentPhase.name,
+            mission: this.currentPhase.subtitle,
             actionBtn: player.smartAction || { available: false, label: 'ACTION', color: '#333344', progress: 0 }
           });
         }
       }
 
-      // 8. Broadcast 20Hz Compact Snapshot to Host Screen
+      // 6. Broadcast 20Hz Snapshot to Host
       this.broadcastSnapshot(leaderboard);
     }
 
     this.lastTickComputationMs = performance.now() - startTime;
+  }
+
+  updateMatchPhase(elapsedFraction) {
+    for (let i = CONFIG.PHASES.length - 1; i >= 0; i--) {
+      const phase = CONFIG.PHASES[i];
+      if (elapsedFraction >= phase.fractionStart) {
+        if (this.currentPhaseIndex !== i) {
+          this.currentPhaseIndex = i;
+          this.currentPhase = phase;
+          console.log(`[Timeline] ⚡ Phase Changed -> ${phase.name} (${phase.subtitle})`);
+          this.io.emit('phase_change', {
+            phaseIndex: i,
+            phase: phase
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  // --- Pre-Match Countdown Sequence ---
+  startMatch() {
+    const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
+    if (this.state !== CONFIG.STATES.LOBBY) return false;
+    if (activePlayers.length < CONFIG.MIN_PLAYERS_TO_START) return false;
+
+    this.initSeededMap();
+
+    // Spawn players spread around Start Plaza
+    activePlayers.forEach((player, idx) => {
+      const spawn = this.getPlazaSpawnPosition(idx, activePlayers.length);
+      player.x = spawn.x;
+      player.y = spawn.y;
+      player.vx = 0;
+      player.vy = 0;
+      player.score = 0;
+      player.hasKey = false;
+      player.input = { x: 0, y: 0, action: false };
+    });
+
+    this.state = CONFIG.STATES.COUNTDOWN;
+    this.countdownRemaining = CONFIG.COUNTDOWN_DURATION_SEC;
+    console.log(`[GameManager] Countdown Started (${CONFIG.COUNTDOWN_DURATION_SEC}s)...`);
+
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
+    this.countdownInterval = setInterval(() => {
+      this.countdownRemaining--;
+      this.io.emit('countdown_tick', { count: this.countdownRemaining });
+
+      if (this.countdownRemaining <= 0) {
+        clearInterval(this.countdownInterval);
+        this.launchRunningMatch();
+      }
+    }, 1000);
+
+    this.broadcastFullState();
+    return true;
+  }
+
+  launchRunningMatch() {
+    this.state = CONFIG.STATES.RUNNING;
+    console.log(`[GameManager] 🏁 MATCH LAUNCHED! Duration: ${this.totalMatchDurationSec}s [Seed: #${this.matchSeed}]`);
+    this.broadcastFullState();
+  }
+
+  endMatch() {
+    this.state = CONFIG.STATES.ENDED;
+    console.log('[GameManager] 🏆 MATCH COMPLETED! Displaying final podium.');
+
+    // Freeze all player movement
+    for (const p of this.players.values()) {
+      p.vx = 0;
+      p.vy = 0;
+      p.input = { x: 0, y: 0, action: false };
+    }
+
+    const finalLeaderboard = this.scoring.getLeaderboard(this.players);
+    this.io.emit('match_ended', {
+      leaderboard: finalLeaderboard,
+      podium: finalLeaderboard.slice(0, 3)
+    });
+
+    this.broadcastFullState();
+  }
+
+  resetToLobby() {
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
+
+    this.state = CONFIG.STATES.LOBBY;
+    this.matchTimeRemaining = this.totalMatchDurationSec;
+    this.countdownRemaining = CONFIG.COUNTDOWN_DURATION_SEC;
+
+    // Reset player scores & positions, keep connections intact
+    const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
+    activePlayers.forEach((player, idx) => {
+      const spawn = this.getPlazaSpawnPosition(idx, activePlayers.length);
+      player.x = spawn.x;
+      player.y = spawn.y;
+      player.vx = 0;
+      player.vy = 0;
+      player.score = 0;
+      player.hasKey = false;
+      player.input = { x: 0, y: 0, action: false };
+    });
+
+    console.log('[GameManager] Reset to LOBBY (All players preserved).');
+    this.broadcastFullState();
   }
 
   updatePlayerMovement(player, dt) {
@@ -151,18 +278,15 @@ export class GameManager {
       }
     }
 
-    // Friction damping
     player.vx *= CONFIG.PHYSICS.FRICTION;
     player.vy *= CONFIG.PHYSICS.FRICTION;
 
     if (Math.abs(player.vx) < 0.1) player.vx = 0;
     if (Math.abs(player.vy) < 0.1) player.vy = 0;
 
-    // Position integration
     player.x += player.vx * dt;
     player.y += player.vy * dt;
 
-    // World boundary clamping
     const r = CONFIG.PHYSICS.PLAYER_RADIUS;
     player.x = Math.max(r, Math.min(CONFIG.WORLD.WIDTH - r, player.x));
     player.y = Math.max(r, Math.min(CONFIG.WORLD.HEIGHT - r, player.y));
@@ -269,8 +393,7 @@ export class GameManager {
               color: player.color.hex,
               timestamp: Date.now()
             });
-            // Award Discovery Bonus points!
-            this.scoring.awardPoints(player, CONFIG.SCORING.DISCOVERY_BONUS, `FIRST TO EXPLORE ${region.name}`, { x: player.x, y: player.y });
+            this.scoring.awardPoints(player, CONFIG.SCORING.DISCOVERY_BONUS, `EXPLORED ${region.name}`, { x: player.x, y: player.y });
           }
         }
       }
@@ -283,6 +406,12 @@ export class GameManager {
 
     const player = this.players.get(playerId);
     if (!player) return;
+
+    // Movement allowed only during RUNNING
+    if (this.state !== CONFIG.STATES.RUNNING) {
+      player.input = { x: 0, y: 0, action: false };
+      return;
+    }
 
     let rawX = Number(inputData.x) || 0;
     let rawY = Number(inputData.y) || 0;
@@ -331,7 +460,7 @@ export class GameManager {
       player.socketId = socket.id;
       player.connected = true;
       if (name) player.name = sanitizedName;
-      console.log(`[GameManager] Player reconnected: ${player.name} (${playerId})`);
+      console.log(`[GameManager] Player reconnected: ${player.name} (${playerId}) [Score: ${player.score || 0}]`);
     } else {
       const connectedCount = Array.from(this.players.values()).filter(p => p.connected).length;
       if (connectedCount >= CONFIG.MAX_PLAYERS) {
@@ -394,38 +523,6 @@ export class GameManager {
     }
   }
 
-  startMatch() {
-    const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
-    if (this.state !== CONFIG.STATES.LOBBY) return false;
-    if (activePlayers.length < CONFIG.MIN_PLAYERS_TO_START) return false;
-
-    // Reset scores & seed for new match
-    this.initSeededMap();
-
-    activePlayers.forEach((player, idx) => {
-      const spawn = this.getPlazaSpawnPosition(idx, activePlayers.length);
-      player.x = spawn.x;
-      player.y = spawn.y;
-      player.vx = 0;
-      player.vy = 0;
-      player.score = 0;
-      player.hasKey = false;
-      player.input = { x: 0, y: 0, action: false };
-    });
-
-    this.state = CONFIG.STATES.RUNNING;
-    console.log(`[GameManager] Match Started! Active racers: ${activePlayers.length} [Seed: #${this.matchSeed}]`);
-    this.broadcastFullState();
-    return true;
-  }
-
-  stopMatch() {
-    if (this.state === CONFIG.STATES.LOBBY) return;
-    this.state = CONFIG.STATES.LOBBY;
-    console.log('[GameManager] Match stopped -> Returned to Lobby.');
-    this.broadcastFullState();
-  }
-
   getPublicState() {
     const activePlayers = Array.from(this.players.values())
       .filter(p => p.connected)
@@ -447,6 +544,10 @@ export class GameManager {
       canStart: this.state === CONFIG.STATES.LOBBY && activePlayers.length >= CONFIG.MIN_PLAYERS_TO_START,
       world: CONFIG.WORLD,
       seed: this.matchSeed,
+      countdown: this.countdownRemaining,
+      timeRemaining: Math.ceil(this.matchTimeRemaining),
+      phaseIndex: this.currentPhaseIndex,
+      phase: this.currentPhase,
       map: {
         regions: MAP_REGIONS,
         walls: this.activeWalls,
@@ -480,6 +581,9 @@ export class GameManager {
     const snapshot = {
       t: Date.now(),
       tickTime: Math.round(this.lastTickComputationMs * 100) / 100,
+      timeRemaining: Math.ceil(this.matchTimeRemaining),
+      phaseIndex: this.currentPhaseIndex,
+      phase: this.currentPhase,
       p: activePlayers,
       ent: this.interactables.getVisibleEntities(),
       lb: leaderboard.slice(0, 5),

@@ -1,4 +1,4 @@
-// server/game/interactables.js - Server-authoritative interactable entity manager
+// server/game/interactables.js - Server-authoritative interactable entity manager with phase-weighted spawns
 import { CONFIG } from '../config.js';
 import { POI_POOLS } from './mapData.js';
 import { createRng } from './seededRng.js';
@@ -7,35 +7,45 @@ export class InteractableManager {
   constructor(gameManager, scoring) {
     this.gameManager = gameManager;
     this.scoring = scoring;
-    this.entities = new Map(); // id -> Entity
+    this.entities = new Map();
     this.rng = createRng(12345);
   }
 
-  // Initialize all interactive entities for the match from seeded layout
-  initForMatch(seed, seededPois) {
+  // Pick treasure tier based on current match phase spawn table
+  getTierForPhase(phase) {
+    const weights = (phase && phase.weights) ? phase.weights : { common: 0.6, rare: 0.3, epic: 0.1 };
+    const rand = this.rng.random();
+
+    if (rand < weights.common) return 'common';
+    if (rand < weights.common + weights.rare) return 'rare';
+    return 'epic';
+  }
+
+  applyTreasureTier(entity, tier) {
+    entity.tier = tier;
+    entity.points = tier === 'epic' ? CONFIG.SCORING.TREASURE_EPIC : (tier === 'rare' ? CONFIG.SCORING.TREASURE_RARE : CONFIG.SCORING.TREASURE_COMMON);
+    entity.colorHex = tier === 'epic' ? '#FF0055' : (tier === 'rare' ? '#FFE600' : '#00F0FF');
+    entity.colorNum = tier === 'epic' ? 0xff0055 : (tier === 'rare' ? 0xffe600 : 0x00f0ff);
+  }
+
+  initForMatch(seed, seededPois, initialPhase) {
     this.entities.clear();
     this.rng = createRng(seed);
 
-    // 1. Treasures (Common, Rare, Epic)
+    // 1. Treasures with Phase 1 initial tiers
     for (const t of (seededPois.treasures || [])) {
-      const tier = t.tier || (this.rng.random() < 0.5 ? 'common' : (this.rng.random() < 0.8 ? 'rare' : 'epic'));
-      const points = tier === 'epic' ? CONFIG.SCORING.TREASURE_EPIC : (tier === 'rare' ? CONFIG.SCORING.TREASURE_RARE : CONFIG.SCORING.TREASURE_COMMON);
-      const colorHex = tier === 'epic' ? '#FF0055' : (tier === 'rare' ? '#FFE600' : '#00F0FF');
-      const colorNum = tier === 'epic' ? 0xff0055 : (tier === 'rare' ? 0xffe600 : 0x00f0ff);
-
-      this.entities.set(t.id, {
+      const tier = this.getTierForPhase(initialPhase);
+      const entity = {
         id: t.id,
         type: 'treasure',
-        tier: tier,
         x: t.x,
         y: t.y,
         radius: CONFIG.INTERACT_RADIUS.TREASURE,
-        points: points,
-        colorHex: colorHex,
-        colorNum: colorNum,
         state: 'active',
         respawnAt: 0
-      });
+      };
+      this.applyTreasureTier(entity, tier);
+      this.entities.set(t.id, entity);
     }
 
     // 2. Chests (1s Hold to open)
@@ -49,7 +59,7 @@ export class InteractableManager {
         colorHex: '#FFAA00',
         colorNum: 0xffaa00,
         state: 'active',
-        holdingPlayers: new Map(), // playerId -> startTimestamp
+        holdingPlayers: new Map(),
         respawnAt: 0
       });
     }
@@ -70,7 +80,7 @@ export class InteractableManager {
       });
     }
 
-    // 4. Keys (Pickups to unlock vaults)
+    // 4. Keys
     const keyPositions = this.rng.pick(POI_POOLS.keys, CONFIG.POI_COUNTS.KEYS);
     for (const k of keyPositions) {
       this.entities.set(k.id, {
@@ -129,7 +139,7 @@ export class InteractableManager {
       });
     }
 
-    // 7. Merchants (Gamble)
+    // 7. Merchants
     for (const m of (seededPois.merchants || [])) {
       this.entities.set(m.id, {
         id: m.id,
@@ -147,16 +157,20 @@ export class InteractableManager {
     console.log(`[Interactables] Initialized ${this.entities.size} interactive entities for match.`);
   }
 
-  // 20Hz Tick: Process respawns and update player interaction prompts
-  tick(activePlayers) {
+  // 20Hz Tick: Process respawns using phase weights and update player prompts
+  tick(activePlayers, currentPhase) {
     const now = Date.now();
 
-    // 1. Process Respawns
+    // 1. Process Respawns with current phase weights
     for (const ent of this.entities.values()) {
       if (ent.state === 'collected' || ent.state === 'opened') {
         if (ent.respawnAt && now >= ent.respawnAt) {
           ent.state = 'active';
           ent.respawnAt = 0;
+          if (ent.type === 'treasure') {
+            const newTier = this.getTierForPhase(currentPhase);
+            this.applyTreasureTier(ent, newTier);
+          }
         }
       }
     }
@@ -171,7 +185,6 @@ export class InteractableManager {
     let nearest = null;
     let nearestDist = Infinity;
 
-    // Find nearest active interactable within its interaction radius
     for (const ent of this.entities.values()) {
       if (ent.state !== 'active') continue;
 
@@ -182,7 +195,6 @@ export class InteractableManager {
       }
     }
 
-    // Initialize player interaction context
     let actionState = {
       available: false,
       label: 'ACTION',
@@ -193,11 +205,9 @@ export class InteractableManager {
     if (nearest) {
       actionState = this.getInteractablePrompt(player, nearest, now);
 
-      // If player is pressing the action button, handle the action!
       if (player.input && player.input.action) {
         this.handleActionPress(player, nearest, now);
       } else if (nearest.type === 'chest' && nearest.holdingPlayers) {
-        // Reset chest hold if player releases button
         nearest.holdingPlayers.delete(player.id);
       }
     }
@@ -323,7 +333,7 @@ export class InteractableManager {
           const holdStart = ent.holdingPlayers.get(player.id);
           if (now - holdStart >= CONFIG.SCORING.CHEST_HOLD_MS) {
             ent.state = 'opened';
-            ent.respawnAt = now + 16000;
+            ent.respawnAt = now + 15000;
             ent.holdingPlayers.clear();
             const reward = this.rng.rangeInt(CONFIG.SCORING.CHEST_MIN, CONFIG.SCORING.CHEST_MAX);
             this.scoring.awardPoints(player, reward, 'SECRET CHEST', { x: ent.x, y: ent.y });
@@ -376,7 +386,6 @@ export class InteractableManager {
     }
   }
 
-  // Active state for host rendering
   getVisibleEntities() {
     return Array.from(this.entities.values()).map(e => ({
       id: e.id,

@@ -56,17 +56,16 @@
 
     <!-- View 3: Running Controller Screen -->
     <div id="running-view" class="view running-layout">
-      <!-- Top HUD Stats: Rank & Score -->
+      <!-- Top HUD Stats: Rank, Timer, Score -->
       <div class="hud-stats-bar">
         <div class="hud-stat-box rank-box">
           <span class="hud-label">RANK</span>
           <span class="hud-value" id="hud-rank">#1</span>
         </div>
 
-        <div class="hud-player-badge">
-          <div class="player-dot mini-dot" id="running-player-dot"></div>
-          <span id="running-player-name">---</span>
-          <span id="hud-key-badge" class="hud-key-badge hidden">🔑</span>
+        <div class="hud-stat-box timer-box">
+          <span class="hud-label">TIME</span>
+          <span class="hud-value" id="hud-timer">10:00</span>
         </div>
 
         <div class="hud-stat-box score-box">
@@ -75,10 +74,17 @@
         </div>
       </div>
 
-      <!-- Single Mission Line -->
-      <div class="mission-bar">
-        <span class="mission-icon">🎯</span>
-        <span class="mission-text" id="hud-mission">RACE FOR TREASURE & DISCOVER REGIONS</span>
+      <!-- Player Info & Mission Line -->
+      <div class="hud-top-subbar">
+        <div class="hud-player-badge">
+          <div class="player-dot mini-dot" id="running-player-dot"></div>
+          <span id="running-player-name">---</span>
+          <span id="hud-key-badge" class="hud-key-badge hidden">🔑</span>
+        </div>
+        <div class="mission-bar">
+          <span class="mission-icon">🎯</span>
+          <span class="mission-text" id="hud-mission">RACE FOR TREASURE</span>
+        </div>
       </div>
 
       <!-- Main Game Controller Surface -->
@@ -100,6 +106,40 @@
             <span class="action-glow-ring"></span>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- View 4: Match Ended View -->
+    <div id="ended-view" class="view ended-layout">
+      <div class="ended-header">
+        <div class="trophy-icon">🏆</div>
+        <h1 class="ended-title">MATCH FINISHED</h1>
+        <p class="ended-sub">LOOK AT BIG SCREEN FOR PODIUM CEREMONY</p>
+      </div>
+
+      <div class="ended-stats-card">
+        <div class="ended-stat-row">
+          <span class="ended-stat-label">FINAL PLACEMENT</span>
+          <span class="ended-stat-value rank-highlight" id="ended-rank">#1</span>
+        </div>
+        <div class="ended-divider"></div>
+        <div class="ended-stat-row">
+          <span class="ended-stat-label">TOTAL SCORE</span>
+          <span class="ended-stat-value score-highlight" id="ended-score">0 PTS</span>
+        </div>
+      </div>
+
+      <div class="ended-footer-tip">
+        Host can press <b>R</b> to start a new match
+      </div>
+    </div>
+
+    <!-- Countdown Fullscreen Overlay -->
+    <div id="countdown-overlay" class="countdown-overlay hidden">
+      <div class="countdown-card">
+        <div class="countdown-title">MATCH STARTING IN</div>
+        <div class="countdown-number" id="countdown-num">5</div>
+        <div class="countdown-sub">PREPARE TO STEER!</div>
       </div>
     </div>
   </div>

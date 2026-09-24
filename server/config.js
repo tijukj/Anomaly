@@ -9,6 +9,52 @@ export const CONFIG = {
   TICK_INTERVAL_MS: 1000 / 20, // 50ms per tick
   INPUT_HEARTBEAT_MS: 250, // 250ms heartbeat for controller inputs
 
+  // Match Timeline & Durations
+  COUNTDOWN_DURATION_SEC: 5, // 5s pre-match countdown
+  STANDARD_MATCH_DURATION_SEC: 600, // 10 minutes standard
+  SHORT_MATCH_DURATION_SEC: 120, // 2 minutes short test mode
+  DEBUG_SHORT_MATCH: false, // Set to true for rapid 120s match testing
+
+  // Four Match Phases by Time Fraction (0.0 to 1.0)
+  PHASES: [
+    {
+      id: 'discovery',
+      name: 'PHASE 1: DISCOVERY',
+      subtitle: 'EXPLORE THE MAP & FIND EASY TREASURES',
+      fractionStart: 0.0,
+      fractionEnd: 0.2,
+      colorHex: '#00F0FF',
+      weights: { common: 0.75, rare: 0.25, epic: 0.0 }
+    },
+    {
+      id: 'competition',
+      name: 'PHASE 2: COMPETITION',
+      subtitle: 'VALUABLE LOOT SPAWNING - OPEN CHESTS',
+      fractionStart: 0.2,
+      fractionEnd: 0.6,
+      colorHex: '#39FF14',
+      weights: { common: 0.40, rare: 0.45, epic: 0.15 }
+    },
+    {
+      id: 'hunt',
+      name: 'PHASE 3: THE HUNT',
+      subtitle: 'VAULTS ACTIVE - UNLOCK CITADEL & CAVES',
+      fractionStart: 0.6,
+      fractionEnd: 0.8,
+      colorHex: '#FFAA00',
+      weights: { common: 0.20, rare: 0.50, epic: 0.30 }
+    },
+    {
+      id: 'chaos',
+      name: 'PHASE 4: CHAOS FINALE',
+      subtitle: 'EPIC TREASURES & HIGH STAKES - RACE TO 1ST',
+      fractionStart: 0.8,
+      fractionEnd: 1.0,
+      colorHex: '#FF0055',
+      weights: { common: 0.10, rare: 0.40, epic: 0.50 }
+    }
+  ],
+
   // World Map Dimensions (1600x1000)
   WORLD: {
     WIDTH: 1600,
@@ -50,8 +96,8 @@ export const CONFIG = {
     MERCHANT_MAX: 25,
     MERCHANT_COOLDOWN_SEC: 20,
     PORTAL_COOLDOWN_SEC: 3,
-    CHEST_HOLD_MS: 1000, // 1 second hold to open
-    TREASURE_RESPAWN_MS: 8000 // 8s respawn for collected treasures
+    CHEST_HOLD_MS: 1000,
+    TREASURE_RESPAWN_MS: 7000
   },
 
   // Interaction Radii (distance in pixels)
@@ -67,7 +113,7 @@ export const CONFIG = {
 
   // Seeded POI Counts Per Match
   POI_COUNTS: {
-    TREASURES: 12,
+    TREASURES: 14,
     CHESTS: 4,
     VAULTS: 2,
     KEYS: 2,
@@ -104,6 +150,7 @@ export const CONFIG = {
   // Game States
   STATES: {
     LOBBY: 'LOBBY',
+    COUNTDOWN: 'COUNTDOWN',
     RUNNING: 'RUNNING',
     ENDED: 'ENDED'
   }

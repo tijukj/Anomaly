@@ -1,4 +1,4 @@
-// public/host/host.js - Big Screen Phaser 3 Host Arena, Interactables & Leaderboard
+// public/host/host.js - Big Screen Phaser 3 Host Arena, Countdown, Timeline & Podium
 const socket = io({
   transports: ['websocket', 'polling']
 });
@@ -19,6 +19,10 @@ let currentGameState = {
   playerCount: 0,
   canStart: false,
   seed: 0,
+  countdown: 5,
+  timeRemaining: 600,
+  phaseIndex: 0,
+  phase: { name: 'PHASE 1: DISCOVERY', colorHex: '#00F0FF' },
   map: null
 };
 
@@ -48,14 +52,24 @@ async function initServerInfo() {
 
 await initServerInfo();
 
+function formatTime(totalSeconds) {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
 class HostScene extends Phaser.Scene {
   constructor() {
     super({ key: 'HostScene' });
     this.playerMap = new Map();
-    this.interactableObjects = new Map();
+    this.interactablesGraphics = null;
+    this.hudContainer = null;
+    this.countdownContainer = null;
+    this.endedContainer = null;
     this.leaderboardContainer = null;
     this.debugContainer = null;
     this.poiDebugContainer = null;
+    this.lastRenderedState = '';
   }
 
   preload() {
@@ -73,6 +87,9 @@ class HostScene extends Phaser.Scene {
     this.interactablesGraphics = this.add.graphics();
     this.labelsContainer = this.add.container(0, 0);
     this.fxContainer = this.add.container(0, 0);
+    this.hudContainer = this.add.container(0, 0);
+    this.countdownContainer = this.add.container(0, 0);
+    this.endedContainer = this.add.container(0, 0);
     this.leaderboardContainer = this.add.container(0, 0);
     this.poiDebugContainer = this.add.container(0, 0);
     this.lobbyContainer = this.add.container(0, 0);
@@ -98,9 +115,11 @@ class HostScene extends Phaser.Scene {
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.spaceKey.on('down', () => this.triggerStartMatch());
 
-    // ESC to Stop Match & Exit to Lobby
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.escKey.on('down', () => this.triggerStopMatch());
+
+    this.rKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+    this.rKey.on('down', () => this.triggerResetMatch());
 
     this.dKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.dKey.on('down', () => {
@@ -123,17 +142,37 @@ class HostScene extends Phaser.Scene {
       }
       this.renderLobbyUI();
       this.updatePlayerRoster(state.players);
-      if (state.state === 'RUNNING') {
+
+      if (state.state === 'RUNNING' || state.state === 'COUNTDOWN') {
         this.drawFullMap();
         this.renderPoiMarkers();
+        this.renderRunningHUD();
+      } else if (state.state === 'ENDED') {
+        this.renderEndedScreen();
       }
     });
 
-    // Socket Event: Floating score effect & glow burst
+    // Socket Event: Countdown Tick
+    socket.on('countdown_tick', (data) => {
+      currentGameState.countdown = data.count;
+      this.renderCountdown(data.count);
+    });
+
+    // Socket Event: Phase Change Banner
+    socket.on('phase_change', (data) => {
+      this.showPhaseChangeBanner(data.phase);
+    });
+
+    // Socket Event: Score popup
     socket.on('score_popup', (event) => {
       if (currentGameState.state === 'RUNNING') {
         this.spawnScorePopup(event);
       }
+    });
+
+    // Socket Event: Match Ended
+    socket.on('match_ended', (data) => {
+      this.renderEndedScreen(data.leaderboard, data.podium);
     });
 
     // Socket Event: 20Hz compact tick snapshot
@@ -143,8 +182,16 @@ class HostScene extends Phaser.Scene {
       serverTickTimeMs = snapshot.tickTime || 0;
       snapshotBytes = new Blob([JSON.stringify(snapshot)]).size;
 
+      if (snapshot.timeRemaining !== undefined) {
+        currentGameState.timeRemaining = snapshot.timeRemaining;
+      }
+      if (snapshot.phase) {
+        currentGameState.phase = snapshot.phase;
+      }
+
       if (currentGameState.state === 'RUNNING') {
         this.applySnapshot(snapshot);
+        this.renderRunningHUD();
       }
     });
 
@@ -162,20 +209,42 @@ class HostScene extends Phaser.Scene {
   }
 
   triggerStopMatch() {
-    if (currentGameState.state === 'RUNNING') {
+    if (currentGameState.state === 'RUNNING' || currentGameState.state === 'COUNTDOWN') {
       socket.emit('stop_match');
     }
   }
 
+  triggerResetMatch() {
+    socket.emit('reset_match');
+  }
+
   onStateChanged(newState) {
-    if (newState === 'RUNNING') {
+    if (newState === 'COUNTDOWN') {
       this.lobbyContainer.setVisible(false);
+      this.endedContainer.setVisible(false);
+      this.arenaContainer.setVisible(true);
+      this.countdownContainer.setVisible(true);
+      this.drawFullMap();
+      this.renderPoiMarkers();
+    } else if (newState === 'RUNNING') {
+      this.lobbyContainer.setVisible(false);
+      this.countdownContainer.setVisible(false);
+      this.endedContainer.setVisible(false);
       this.arenaContainer.setVisible(true);
       this.drawFullMap();
       this.renderPoiMarkers();
+      this.renderRunningHUD();
+    } else if (newState === 'ENDED') {
+      this.countdownContainer.setVisible(false);
+      this.endedContainer.setVisible(true);
+      this.renderEndedScreen();
     } else {
+      // LOBBY
       this.lobbyContainer.setVisible(true);
       this.arenaContainer.setVisible(false);
+      this.countdownContainer.setVisible(false);
+      this.endedContainer.setVisible(false);
+      this.hudContainer.removeAll(true);
       this.clearAllPlayerEntities();
       this.mapGraphics.clear();
       this.wallsGraphics.clear();
@@ -219,7 +288,6 @@ class HostScene extends Phaser.Scene {
       this.mapGraphics.lineStyle(2, region.colorNum, 0.35);
       this.mapGraphics.strokeRect(b.x, b.y, b.width, b.height);
 
-      // Clean non-overlapping region titles
       if (region.id !== 'plaza' && region.id !== 'river') {
         const label = this.add.text(region.labelPos.x, region.labelPos.y, region.name, {
           fontFamily: '"Impact", "Arial Black", sans-serif',
@@ -231,7 +299,7 @@ class HostScene extends Phaser.Scene {
       }
     }
 
-    // 2. Draw River (Water Band)
+    // 2. Draw River
     this.mapGraphics.fillStyle(0x0088cc, 0.2);
     this.mapGraphics.fillRect(40, 470, 1520, 120);
 
@@ -239,7 +307,6 @@ class HostScene extends Phaser.Scene {
     this.mapGraphics.lineBetween(40, 470, 1560, 470);
     this.mapGraphics.lineBetween(40, 590, 1560, 590);
 
-    // River label in open left area
     const riverLabel = this.add.text(200, 530, '🌊 CYBER RIVER', {
       fontFamily: 'sans-serif',
       fontSize: '13px',
@@ -249,7 +316,7 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5).setAlpha(0.85);
     this.labelsContainer.add(riverLabel);
 
-    // 3. Draw 3 Bridges Crossing River
+    // 3. Draw 3 Bridges
     for (const bridge of mapData.bridges) {
       this.mapGraphics.fillStyle(0x161633, 0.95);
       this.mapGraphics.fillRoundedRect(bridge.x, bridge.y, bridge.width, bridge.height, 6);
@@ -271,7 +338,7 @@ class HostScene extends Phaser.Scene {
       this.labelsContainer.add(bridgeText);
     }
 
-    // 4. Draw Start Plaza Center Circle (Label cleanly below)
+    // 4. Draw Start Plaza Center Circle
     this.mapGraphics.lineStyle(2, 0x00F0FF, 0.6);
     this.mapGraphics.strokeCircle(800, 530, 85);
     this.mapGraphics.strokeCircle(800, 530, 20);
@@ -323,15 +390,15 @@ class HostScene extends Phaser.Scene {
       }
     }
 
-    // 6. Top Left ESC Exit Button
+    // 6. Top Left Controls Hint
     const exitBtn = this.add.graphics();
     exitBtn.fillStyle(0x1a1a2e, 0.8);
-    exitBtn.fillRoundedRect(30, 30, 160, 34, 6);
+    exitBtn.fillRoundedRect(30, 30, 200, 34, 6);
     exitBtn.lineStyle(1.5, 0xFF0055, 0.8);
-    exitBtn.strokeRoundedRect(30, 30, 160, 34, 6);
+    exitBtn.strokeRoundedRect(30, 30, 200, 34, 6);
     this.labelsContainer.add(exitBtn);
 
-    const exitText = this.add.text(110, 47, 'ESC : EXIT TO LOBBY', {
+    const exitText = this.add.text(130, 47, 'ESC: LOBBY | R: RESET', {
       fontFamily: 'sans-serif',
       fontSize: '11px',
       fontStyle: 'bold',
@@ -339,17 +406,141 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.labelsContainer.add(exitText);
 
-    const exitZone = this.add.zone(110, 47, 160, 34).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    const exitZone = this.add.zone(130, 47, 200, 34).setOrigin(0.5).setInteractive({ useHandCursor: true });
     exitZone.on('pointerdown', () => this.triggerStopMatch());
     this.labelsContainer.add(exitZone);
 
     // 7. Match Seed Badge (Bottom Right)
-    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `SEED: #${currentGameState.seed || '000000'} | [M] POI Markers | [ESC] Exit`, {
+    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `SEED: #${currentGameState.seed || '000000'} | [M] POI Markers | [R] Reset`, {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#00F0FF'
     }).setOrigin(1, 0.5);
     this.labelsContainer.add(seedText);
+  }
+
+  // Render Big Center Pre-Match Countdown (5s)
+  renderCountdown(count) {
+    this.countdownContainer.removeAll(true);
+    if (currentGameState.state !== 'COUNTDOWN') return;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x050512, 0.7);
+    bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.countdownContainer.add(bg);
+
+    const countText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 20, count > 0 ? `${count}` : 'RACE!', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: count > 0 ? '140px' : '100px',
+      color: count > 0 ? '#00F0FF' : '#39FF14',
+      stroke: '#FFFFFF',
+      strokeThickness: 4
+    }).setOrigin(0.5);
+
+    const sub = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 80, 'GET READY RACERS - PREPARE YOUR PHONES', {
+      fontFamily: 'sans-serif',
+      fontSize: '18px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      letterSpacing: 4
+    }).setOrigin(0.5);
+
+    this.countdownContainer.add([countText, sub]);
+
+    this.tweens.add({
+      targets: countText,
+      scaleX: 1.3,
+      scaleY: 1.3,
+      duration: 350,
+      yoyo: true,
+      ease: 'Quad.easeInOut'
+    });
+  }
+
+  // Render Top Center Running HUD (Digital Timer & Phase Badge)
+  renderRunningHUD() {
+    this.hudContainer.removeAll(true);
+    if (currentGameState.state !== 'RUNNING') return;
+
+    const timeFormatted = formatTime(currentGameState.timeRemaining || 0);
+    const phase = currentGameState.phase || { name: 'PHASE 1: DISCOVERY', colorHex: '#00F0FF' };
+    const isUrgent = currentGameState.timeRemaining <= 60;
+
+    // HUD Header Box
+    const hudBox = this.add.graphics();
+    hudBox.fillStyle(0x0a0a1e, 0.9);
+    hudBox.fillRoundedRect(WORLD_WIDTH / 2 - 190, 24, 380, 52, 12);
+    hudBox.lineStyle(2, isUrgent ? 0xFF0055 : (currentGameState.phase ? Phaser.Display.Color.HexStringToColor(phase.colorHex).color : 0x00F0FF), 0.85);
+    hudBox.strokeRoundedRect(WORLD_WIDTH / 2 - 190, 24, 380, 52, 12);
+    this.hudContainer.add(hudBox);
+
+    // Large Clock Timer
+    const timerText = this.add.text(WORLD_WIDTH / 2 - 85, 50, `⏱️ ${timeFormatted}`, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '28px',
+      color: isUrgent ? '#FF0055' : '#FFFFFF',
+      letterSpacing: 2
+    }).setOrigin(0.5);
+
+    // Current Phase Badge
+    const phaseBadge = this.add.text(WORLD_WIDTH / 2 + 75, 50, phase.name, {
+      fontFamily: 'sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: phase.colorHex,
+      letterSpacing: 1
+    }).setOrigin(0.5);
+
+    this.hudContainer.add([timerText, phaseBadge]);
+  }
+
+  // Animated Glowing Banner on Phase Transition
+  showPhaseChangeBanner(phase) {
+    const bannerContainer = this.add.container(WORLD_WIDTH / 2, -100);
+
+    const bannerBg = this.add.graphics();
+    const colorNum = Phaser.Display.Color.HexStringToColor(phase.colorHex).color;
+    bannerBg.fillStyle(0x050515, 0.95);
+    bannerBg.fillRoundedRect(-320, -35, 640, 70, 14);
+    bannerBg.lineStyle(3, colorNum, 1);
+    bannerBg.strokeRoundedRect(-320, -35, 640, 70, 14);
+
+    const title = this.add.text(0, -10, phase.name, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '26px',
+      color: phase.colorHex,
+      letterSpacing: 3
+    }).setOrigin(0.5);
+
+    const sub = this.add.text(0, 16, phase.subtitle, {
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      letterSpacing: 1
+    }).setOrigin(0.5);
+
+    bannerContainer.add([bannerBg, title, sub]);
+    bannerContainer.setDepth(150);
+
+    // Slide down from top, wait 3.5s, slide up
+    this.tweens.add({
+      targets: bannerContainer,
+      y: 130,
+      duration: 500,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(3200, () => {
+          this.tweens.add({
+            targets: bannerContainer,
+            y: -120,
+            duration: 400,
+            ease: 'Cubic.easeIn',
+            onComplete: () => bannerContainer.destroy()
+          });
+        });
+      }
+    });
   }
 
   // Draw Live Interactables on Arena
@@ -361,7 +552,6 @@ class HostScene extends Phaser.Scene {
       if (ent.state !== 'active') continue;
 
       if (ent.type === 'treasure') {
-        // Glowing animated gem
         this.interactablesGraphics.fillStyle(ent.colorNum, 0.9);
         this.interactablesGraphics.fillCircle(ent.x, ent.y, 9);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
@@ -369,13 +559,11 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.fillStyle(0xFFFFFF, 0.9);
         this.interactablesGraphics.fillCircle(ent.x - 2, ent.y - 2, 2.5);
       } else if (ent.type === 'chest') {
-        // Amber treasure chest
         this.interactablesGraphics.fillStyle(0xFFAA00, 0.95);
         this.interactablesGraphics.fillRoundedRect(ent.x - 14, ent.y - 12, 28, 24, 4);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
         this.interactablesGraphics.strokeRoundedRect(ent.x - 14, ent.y - 12, 28, 24, 4);
       } else if (ent.type === 'vault') {
-        // Bronze Vault Monolith
         this.interactablesGraphics.fillStyle(0xFF8800, 0.9);
         this.interactablesGraphics.fillRoundedRect(ent.x - 18, ent.y - 18, 36, 36, 6);
         this.interactablesGraphics.lineStyle(2.5, 0xFFFFFF, 1);
@@ -383,26 +571,22 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.fillStyle(0x050510, 1);
         this.interactablesGraphics.fillCircle(ent.x, ent.y, 6);
       } else if (ent.type === 'key') {
-        // Floating Golden Key
         this.interactablesGraphics.fillStyle(0xFFDD00, 1);
         this.interactablesGraphics.fillCircle(ent.x, ent.y, 7);
         this.interactablesGraphics.fillRect(ent.x, ent.y - 2, 10, 4);
         this.interactablesGraphics.lineStyle(1.5, 0xFFFFFF, 1);
         this.interactablesGraphics.strokeCircle(ent.x, ent.y, 7);
       } else if (ent.type === 'portal') {
-        // Swirling Portal Ring
         this.interactablesGraphics.lineStyle(3, 0x00F0FF, 0.85);
         this.interactablesGraphics.strokeCircle(ent.x, ent.y, 16);
         this.interactablesGraphics.fillStyle(0x00F0FF, 0.25);
         this.interactablesGraphics.fillCircle(ent.x, ent.y, 16);
       } else if (ent.type === 'merchant') {
-        // Merchant Kiosk
         this.interactablesGraphics.fillStyle(0x39FF14, 0.9);
         this.interactablesGraphics.fillRoundedRect(ent.x - 16, ent.y - 16, 32, 32, 6);
         this.interactablesGraphics.lineStyle(2, 0x050510, 1);
         this.interactablesGraphics.strokeRoundedRect(ent.x - 16, ent.y - 16, 32, 32, 6);
       } else if (ent.type === 'switch') {
-        // Red Switch Pad
         this.interactablesGraphics.fillStyle(0xFF0055, 0.9);
         this.interactablesGraphics.fillCircle(ent.x, ent.y, 12);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
@@ -411,7 +595,7 @@ class HostScene extends Phaser.Scene {
     }
   }
 
-  // Draw Top 5 Leaderboard on Right Side of Arena
+  // Draw Top 5 Leaderboard on Right Side
   drawHostLeaderboard(leaderboard = []) {
     this.leaderboardContainer.removeAll(true);
     if (currentGameState.state !== 'RUNNING') return;
@@ -420,7 +604,6 @@ class HostScene extends Phaser.Scene {
     const startY = 30;
     const width = 180;
 
-    // Leaderboard Header Box
     const bg = this.add.graphics();
     bg.fillStyle(0x0a0a1e, 0.85);
     bg.fillRoundedRect(startX - 10, startY, width + 20, 36 + leaderboard.length * 40, 10);
@@ -440,13 +623,11 @@ class HostScene extends Phaser.Scene {
       const itemY = startY + 44 + idx * 38;
       const rankColor = idx === 0 ? '#FFE600' : (idx === 1 ? '#CCCCCC' : (idx === 2 ? '#CD7F32' : '#FFFFFF'));
 
-      // Player color pip
       const pip = this.add.graphics();
       pip.fillStyle(player.color.num, 1);
       pip.fillCircle(startX + 8, itemY + 8, 6);
       this.leaderboardContainer.add(pip);
 
-      // Rank & Name
       const nameText = this.add.text(startX + 22, itemY + 8, `${idx + 1}. ${player.name}`, {
         fontFamily: 'sans-serif',
         fontSize: '12px',
@@ -454,7 +635,6 @@ class HostScene extends Phaser.Scene {
         color: rankColor
       }).setOrigin(0, 0.5);
 
-      // Score
       const scoreText = this.add.text(startX + width - 4, itemY + 8, `${player.score}`, {
         fontFamily: 'monospace',
         fontSize: '13px',
@@ -466,9 +646,8 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Floating score popup and burst animation on host
+  // Floating Score Popup
   spawnScorePopup(event) {
-    // 1. Glow burst circle
     const burst = this.add.graphics();
     burst.lineStyle(3, event.colorNum || 0x39ff14, 0.9);
     burst.strokeCircle(event.x, event.y, 10);
@@ -484,7 +663,6 @@ class HostScene extends Phaser.Scene {
       onComplete: () => burst.destroy()
     });
 
-    // 2. Floating +Points Text
     const popupText = this.add.text(event.x, event.y - 10, `+${event.amount}`, {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
@@ -502,6 +680,115 @@ class HostScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => popupText.destroy()
     });
+  }
+
+  // Render Final Match Results / Podium Screen
+  renderEndedScreen(leaderboard = [], podium = []) {
+    this.endedContainer.removeAll(true);
+    if (currentGameState.state !== 'ENDED') return;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x050512, 0.92);
+    bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.endedContainer.add(bg);
+
+    const title = this.add.text(WORLD_WIDTH / 2, 80, '🏆 MATCH COMPLETED 🏆', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '56px',
+      color: '#FFE600',
+      letterSpacing: 6,
+      stroke: '#000000',
+      strokeThickness: 4
+    }).setOrigin(0.5);
+    this.endedContainer.add(title);
+
+    // 1. Draw Podium Pillars for Top 3
+    const podiumX = [WORLD_WIDTH / 2, WORLD_WIDTH / 2 - 220, WORLD_WIDTH / 2 + 220]; // 1st (center), 2nd (left), 3rd (right)
+    const podiumH = [200, 150, 120];
+    const podiumColors = [0xFFD700, 0xC0C0C0, 0xCD7F32];
+    const ranks = ['1ST PLACE 👑', '2ND PLACE 🥈', '3RD PLACE 🥉'];
+
+    const sortedTop3 = podium.length > 0 ? podium : currentGameState.players.slice(0, 3);
+
+    sortedTop3.forEach((p, idx) => {
+      const x = idx === 0 ? podiumX[0] : (idx === 1 ? podiumX[1] : podiumX[2]);
+      const h = idx === 0 ? podiumH[0] : (idx === 1 ? podiumH[1] : podiumH[2]);
+      const baseY = 540;
+
+      // Pillar Box
+      const pillar = this.add.graphics();
+      pillar.fillStyle(0x14142e, 0.9);
+      pillar.fillRoundedRect(x - 90, baseY - h, 180, h, 8);
+      pillar.lineStyle(3, podiumColors[idx] || 0xFFFFFF, 1);
+      pillar.strokeRoundedRect(x - 90, baseY - h, 180, h, 8);
+      this.endedContainer.add(pillar);
+
+      // Player Color Pip
+      const pip = this.add.graphics();
+      pip.fillStyle(p.color.num, 1);
+      pip.fillCircle(x, baseY - h - 35, 18);
+      this.endedContainer.add(pip);
+
+      // Rank Label
+      const rankLabel = this.add.text(x, baseY - h + 24, ranks[idx], {
+        fontFamily: 'sans-serif',
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color: '#FFFFFF'
+      }).setOrigin(0.5);
+
+      // Player Name
+      const nameText = this.add.text(x, baseY - h + 55, p.name, {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
+        fontSize: '22px',
+        color: '#FFFFFF',
+        letterSpacing: 1
+      }).setOrigin(0.5);
+
+      // Score
+      const scoreText = this.add.text(x, baseY - h + 90, `${p.score} PTS`, {
+        fontFamily: 'monospace',
+        fontSize: '20px',
+        fontStyle: 'bold',
+        color: '#39FF14'
+      }).setOrigin(0.5);
+
+      this.endedContainer.add([rankLabel, nameText, scoreText]);
+    });
+
+    // 2. Reset Button & Shortcut Hint
+    const btnY = WORLD_HEIGHT - 120;
+    const btnW = 320;
+    const btnH = 58;
+
+    const resetBtn = this.add.graphics();
+    resetBtn.fillStyle(0x00F0FF, 1);
+    resetBtn.fillRoundedRect(WORLD_WIDTH / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
+    resetBtn.lineStyle(2, 0xFFFFFF, 1);
+    resetBtn.strokeRoundedRect(WORLD_WIDTH / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
+    this.endedContainer.add(resetBtn);
+
+    const resetText = this.add.text(WORLD_WIDTH / 2, btnY, 'RETURN TO LOBBY', {
+      fontFamily: 'sans-serif',
+      fontSize: '20px',
+      fontStyle: 'bold',
+      color: '#050510',
+      letterSpacing: 2
+    }).setOrigin(0.5);
+
+    const keyHint = this.add.text(WORLD_WIDTH / 2, btnY + 44, '[ Press R on keyboard to reset ]', {
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+      color: '#00F0FF'
+    }).setOrigin(0.5);
+
+    this.endedContainer.add([resetText, keyHint]);
+
+    const zone = this.add.zone(WORLD_WIDTH / 2, btnY, btnW, btnH).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    zone.on('pointerdown', () => this.triggerResetMatch());
+    this.endedContainer.add(zone);
+
+    this.endedContainer.setDepth(200);
   }
 
   renderPoiMarkers() {
@@ -818,9 +1105,9 @@ class HostScene extends Phaser.Scene {
   setupDebugOverlay() {
     this.debugBg = this.add.graphics();
     this.debugBg.fillStyle(0x050515, 0.85);
-    this.debugBg.fillRoundedRect(0, 0, 280, 150, 8);
+    this.debugBg.fillRoundedRect(0, 0, 280, 160, 8);
     this.debugBg.lineStyle(1, 0x00F0FF, 0.8);
-    this.debugBg.strokeRoundedRect(0, 0, 280, 150, 8);
+    this.debugBg.strokeRoundedRect(0, 0, 280, 160, 8);
 
     this.debugText = this.add.text(14, 14, '', {
       fontFamily: 'monospace',
@@ -852,14 +1139,15 @@ class HostScene extends Phaser.Scene {
 
     if (showDebugOverlay) {
       const fps = Math.round(this.game.loop.actualFps);
+      const phaseName = (currentGameState.phase && currentGameState.phase.name) || 'DISCOVERY';
       this.debugText.setText(
         `[DEBUG OVERLAY] (Press D)\n` +
         `FPS          : ${fps}\n` +
         `Racers       : ${currentGameState.playerCount}/20\n` +
         `Server Tick  : ${serverTickTimeMs} ms\n` +
-        `Snapshot Size: ${snapshotBytes} bytes\n` +
-        `Match Seed   : #${currentGameState.seed || 0}\n` +
-        `POI Overlay  : [M] ${showPoiDebugMarkers ? 'ON' : 'OFF'}`
+        `Time Left    : ${formatTime(currentGameState.timeRemaining || 0)}\n` +
+        `Phase        : ${phaseName}\n` +
+        `Match Seed   : #${currentGameState.seed || 0}`
       );
     }
   }
