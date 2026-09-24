@@ -27,8 +27,8 @@ let snapshotBytes = 0;
 let serverTickTimeMs = 0;
 let showDebugOverlay = false;
 
-// Fetch server config info
-async function fetchServerInfo() {
+// Pre-fetch server info before Phaser starts
+async function initServerInfo() {
   try {
     const res = await fetch('/api/server-info');
     serverInfo = await res.json();
@@ -43,6 +43,8 @@ async function fetchServerInfo() {
   }
 }
 
+await initServerInfo();
+
 class HostScene extends Phaser.Scene {
   constructor() {
     super({ key: 'HostScene' });
@@ -50,8 +52,7 @@ class HostScene extends Phaser.Scene {
     this.debugContainer = null;
   }
 
-  async preload() {
-    await fetchServerInfo();
+  preload() {
     const qrEndpoint = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
     this.load.image('qrcode', qrEndpoint);
   }
@@ -64,6 +65,21 @@ class HostScene extends Phaser.Scene {
     this.lobbyContainer = this.add.container(0, 0);
     this.arenaContainer = this.add.container(0, 0);
     this.debugContainer = this.add.container(20, 20);
+
+    // Fallback image loader to guarantee QR visibility
+    if (!this.textures.exists('qrcode')) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (!this.textures.exists('qrcode')) {
+          this.textures.addImage('qrcode', img);
+          if (currentGameState.state === 'LOBBY') {
+            this.renderLobbyUI();
+          }
+        }
+      };
+      img.src = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
+    }
 
     // Keyboard controls
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -197,7 +213,7 @@ class HostScene extends Phaser.Scene {
     const leftX = w * 0.28;
     const leftY = 515;
     const boxW = 460;
-    const boxH = 510;
+    const boxH = 520;
 
     const qrBox = this.add.graphics();
     qrBox.fillStyle(0x0c0c20, 0.85);
@@ -206,7 +222,7 @@ class HostScene extends Phaser.Scene {
     qrBox.strokeRoundedRect(leftX - boxW / 2, leftY - boxH / 2, boxW, boxH, 20);
     this.lobbyContainer.add(qrBox);
 
-    const scanHeader = this.add.text(leftX, leftY - 200, 'SCAN WITH PHONE CAMERA', {
+    const scanHeader = this.add.text(leftX, leftY - 210, 'SCAN WITH PHONE CAMERA', {
       fontFamily: 'sans-serif',
       fontSize: '18px',
       fontStyle: 'bold',
@@ -215,21 +231,27 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.lobbyContainer.add(scanHeader);
 
+    // QR Backing plate for high contrast
+    const qrPlate = this.add.graphics();
+    qrPlate.fillStyle(0xFFFFFF, 1);
+    qrPlate.fillRoundedRect(leftX - 125, leftY - 170, 250, 250, 12);
+    this.lobbyContainer.add(qrPlate);
+
     // QR Image Sprite
     if (this.textures.exists('qrcode')) {
       const qrSprite = this.add.image(leftX, leftY - 45, 'qrcode');
-      qrSprite.setDisplaySize(230, 230);
+      qrSprite.setDisplaySize(240, 240);
       this.lobbyContainer.add(qrSprite);
     }
 
-    const orLabel = this.add.text(leftX, leftY + 105, 'OR BROWSER ADDRESS:', {
+    const orLabel = this.add.text(leftX, leftY + 115, 'OR BROWSER ADDRESS:', {
       fontFamily: 'sans-serif',
       fontSize: '13px',
       color: '#777799',
       letterSpacing: 1
     }).setOrigin(0.5);
 
-    const urlDisplay = this.add.text(leftX, leftY + 135, playUrl, {
+    const urlDisplay = this.add.text(leftX, leftY + 145, playUrl, {
       fontFamily: 'monospace',
       fontSize: playUrl.length > 32 ? '15px' : '18px',
       fontStyle: 'bold',

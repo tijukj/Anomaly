@@ -79,7 +79,7 @@ app.get('/ping', (req, res) => {
 </html>`);
 });
 
-// Dynamic QR Code generation for any play URL
+// Dynamic QR Code generation with high camera-scanning contrast
 const qrCache = new Map();
 app.get('/api/qr.png', async (req, res) => {
   try {
@@ -88,7 +88,7 @@ app.get('/api/qr.png', async (req, res) => {
 
     if (!targetUrl) {
       if (CONFIG.PUBLIC_URL) {
-        targetUrl = `${CONFIG.PUBLIC_URL}/play`;
+        targetUrl = `${CONFIG.PUBLIC_URL.replace(/\/+$/, '')}/play`;
       } else {
         const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
         const host = req.get('host') || `localhost:${CONFIG.PORT}`;
@@ -102,13 +102,14 @@ app.get('/api/qr.png', async (req, res) => {
       return res.send(qrCache.get(targetUrl));
     }
 
+    // High-contrast QR code for instant camera recognition
     const buf = await QRCode.toBuffer(targetUrl, {
       type: 'png',
-      margin: 1,
-      width: 320,
+      margin: 2,
+      width: 360,
       color: {
-        dark: '#00F0FF',
-        light: '#080816'
+        dark: '#050515',
+        light: '#FFFFFF'
       }
     });
 
@@ -117,6 +118,7 @@ app.get('/api/qr.png', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buf);
   } catch (err) {
+    console.error('[Server] QR generation error:', err);
     res.status(500).send('Failed to generate QR');
   }
 });
@@ -158,7 +160,7 @@ io.on('connection', (socket) => {
 server.listen(CONFIG.PORT, CONFIG.HOST, () => {
   const localHostUrl = `http://localhost:${CONFIG.PORT}/host`;
   const localPlayUrl = `http://localhost:${CONFIG.PORT}/play`;
-  const liveUrl = CONFIG.PUBLIC_URL ? `${CONFIG.PUBLIC_URL}/play` : localPlayUrl;
+  const liveUrl = CONFIG.PUBLIC_URL ? `${CONFIG.PUBLIC_URL.replace(/\/+$/, '')}/play` : localPlayUrl;
 
   console.log('\n' + '='.repeat(54));
   console.log('  ⚡ ANOMALY SERVER ONLINE ⚡');
