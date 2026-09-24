@@ -7,6 +7,7 @@ import { InteractableManager } from './interactables.js';
 import { MissionManager } from './missions.js';
 import { ClueManager } from './clueManager.js';
 import { AnomalyManager } from './anomalyManager.js';
+import { HazardSentinelManager } from './sentinels.js';
 import crypto from 'crypto';
 
 export class GameManager {
@@ -15,6 +16,7 @@ export class GameManager {
     this.state = CONFIG.STATES.LOBBY;
     this.players = new Map();
     this.socketToPlayerId = new Map();
+    this.pendingJoinRequests = new Map();
     this.colorIndex = 0;
     this.tickInterval = null;
     this.lastTickComputationMs = 0;
@@ -26,6 +28,7 @@ export class GameManager {
     this.interactables = new InteractableManager(this, this.scoring);
     this.missions = new MissionManager(this, this.scoring);
     this.anomalies = new AnomalyManager(this, this.scoring);
+    this.sentinels = new HazardSentinelManager(this, this.scoring);
 
     // Lifecycle & Timeline
     this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
@@ -83,6 +86,7 @@ export class GameManager {
     this.interactables.initForMatch(this.matchSeed, this.seededPois, this.currentPhase);
     this.missions.initForMatch(this.matchSeed);
     this.anomalies.initForMatch(this.matchSeed);
+    this.sentinels.initForMatch(this.matchSeed);
     console.log(`[Map] Seeded Match Initialized [Seed: #${this.matchSeed}] [Duration: ${this.totalMatchDurationSec}s]`);
   }
 
@@ -136,7 +140,10 @@ export class GameManager {
       // 6. Phase 8 Anomalies Lifecycle
       this.anomalies.tick(Date.now(), activePlayerList, elapsedFraction, this.currentPhase);
 
-      // 7. Compute Live Leaderboard
+      // 7. Hazard Sentinels (Roaming point-reducing drones)
+      this.sentinels.tick(activePlayerList, dt, Date.now());
+
+      // 8. Compute Live Leaderboard
       const leaderboard = this.scoring.getLeaderboard(this.players);
       const rankMap = new Map(leaderboard.map(item => [item.id, item]));
 
@@ -521,6 +528,92 @@ export class GameManager {
     };
   }
 
+  // Join Request Gate (Host must approve before player joins/rejoins)
+  requestPlayerJoin(socket, { playerId, name }) {
+    const sanitizedName = (name || 'RACER').trim().slice(0, CONFIG.MAX_NAME_LENGTH) || 'RACER';
+    const isRejoin = Boolean(playerId && this.players.has(playerId));
+    const requestId = 'req_' + Math.random().toString(36).substring(2, 9);
+
+    const pendingEntry = {
+      requestId,
+      socketId: socket.id,
+      playerId,
+      name: sanitizedName,
+      isRejoin,
+      timestamp: Date.now()
+    };
+
+    this.pendingJoinRequests.set(requestId, pendingEntry);
+
+    // Notify player controller that they are in the approval queue
+    socket.emit('join_pending', {
+      requestId,
+      name: sanitizedName,
+      message: 'Awaiting host approval on big screen...'
+    });
+
+    // Notify host screen with join request
+    this.broadcastPendingRequests();
+    console.log(`[GameManager] Join request created: ${sanitizedName} (req: ${requestId})`);
+  }
+
+  approvePlayerJoin(requestId) {
+    let req = null;
+    if (requestId) {
+      req = this.pendingJoinRequests.get(requestId);
+    } else if (this.pendingJoinRequests.size > 0) {
+      // Pick first request if no ID provided
+      req = this.pendingJoinRequests.values().next().value;
+    }
+    if (!req) return;
+
+    this.pendingJoinRequests.delete(req.requestId);
+    const socket = this.io.sockets.sockets.get(req.socketId);
+    if (socket) {
+      this.registerOrReconnectPlayer(socket, { playerId: req.playerId, name: req.name });
+    }
+    this.broadcastPendingRequests();
+  }
+
+  rejectPlayerJoin(requestId) {
+    let req = null;
+    if (requestId) {
+      req = this.pendingJoinRequests.get(requestId);
+    } else if (this.pendingJoinRequests.size > 0) {
+      req = this.pendingJoinRequests.values().next().value;
+    }
+    if (!req) return;
+
+    this.pendingJoinRequests.delete(req.requestId);
+    const socket = this.io.sockets.sockets.get(req.socketId);
+    if (socket) {
+      socket.emit('join_rejected', { message: 'Host declined your join request.' });
+    }
+    this.broadcastPendingRequests();
+  }
+
+  approveAllJoins() {
+    const list = Array.from(this.pendingJoinRequests.values());
+    this.pendingJoinRequests.clear();
+    for (const req of list) {
+      const socket = this.io.sockets.sockets.get(req.socketId);
+      if (socket) {
+        this.registerOrReconnectPlayer(socket, { playerId: req.playerId, name: req.name });
+      }
+    }
+    this.broadcastPendingRequests();
+  }
+
+  broadcastPendingRequests() {
+    const list = Array.from(this.pendingJoinRequests.values()).map(r => ({
+      requestId: r.requestId,
+      name: r.name,
+      isRejoin: r.isRejoin,
+      timestamp: r.timestamp
+    }));
+    this.io.emit('pending_join_requests', { requests: list, count: list.length });
+  }
+
   registerOrReconnectPlayer(socket, { playerId, name }) {
     const sanitizedName = (name || 'PLAYER').trim().slice(0, CONFIG.MAX_NAME_LENGTH) || 'PLAYER';
     let player = null;
@@ -602,6 +695,12 @@ export class GameManager {
 
   getPublicState() {
     const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
+    const pendingList = Array.from(this.pendingJoinRequests.values()).map(r => ({
+      requestId: r.requestId,
+      name: r.name,
+      isRejoin: r.isRejoin
+    }));
+
     return {
       state: this.state,
       countdown: this.countdownRemaining,
@@ -612,6 +711,7 @@ export class GameManager {
       canStart: activePlayers.length >= CONFIG.MIN_PLAYERS_TO_START,
       seed: this.matchSeed,
       clueState: this.clues ? this.clues.getPublicClueState() : null,
+      pendingRequests: pendingList,
       players: activePlayers.map(p => ({
         id: p.id,
         name: p.name,
@@ -652,7 +752,8 @@ export class GameManager {
       e: this.interactables.getVisibleEntities(),
       lb: leaderboard.slice(0, 5), // Top 5 leaderboard for host HUD
       clues: this.clues ? this.clues.getPublicClueState() : null,
-      anomalies: this.anomalies ? this.anomalies.getActiveState() : null
+      anomalies: this.anomalies ? this.anomalies.getActiveState() : null,
+      sentinels: this.sentinels ? this.sentinels.getActiveSentinels() : []
     };
 
     this.io.emit('snapshot', snapshot);

@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
 
 // DOM Elements - Views
 const joinView = document.getElementById('join-view');
+const waitingView = document.getElementById('waiting-approval-view');
 const lobbyView = document.getElementById('lobby-view');
 const runningView = document.getElementById('running-view');
 const endedView = document.getElementById('ended-view');
@@ -50,6 +51,7 @@ const actionText = document.getElementById('action-text');
 
 let localPlayer = null;
 let currentGameState = 'LOBBY';
+let lastKnownScore = 0;
 
 // Input State
 const MAX_JOYSTICK_RADIUS = 50;
@@ -97,14 +99,42 @@ function formatTime(totalSeconds) {
 }
 
 function showView(viewId) {
-  [joinView, lobbyView, runningView, endedView].forEach(v => {
+  [joinView, waitingView, lobbyView, runningView, endedView].forEach(v => {
     if (v) v.classList.remove('active');
   });
 
   if (viewId === 'join' && joinView) joinView.classList.add('active');
+  if (viewId === 'waiting' && waitingView) waitingView.classList.add('active');
   if (viewId === 'lobby' && lobbyView) lobbyView.classList.add('active');
   if (viewId === 'running' && runningView) runningView.classList.add('active');
   if (viewId === 'ended' && endedView) endedView.classList.add('active');
+}
+
+function showPhoneScorePopup(text, color = '#39FF14') {
+  const popup = document.createElement('div');
+  popup.textContent = text;
+  popup.style.position = 'fixed';
+  popup.style.top = '120px';
+  popup.style.left = '50%';
+  popup.style.transform = 'translateX(-50%) scale(1)';
+  popup.style.fontSize = '24px';
+  popup.style.fontWeight = 'bold';
+  popup.style.fontFamily = 'monospace';
+  popup.style.color = color;
+  popup.style.textShadow = '0 0 10px rgba(0,0,0,0.9), 0 0 5px ' + color;
+  popup.style.zIndex = '9999';
+  popup.style.pointerEvents = 'none';
+  popup.style.transition = 'transform 0.9s ease-out, opacity 0.9s ease-out';
+  document.body.appendChild(popup);
+
+  requestAnimationFrame(() => {
+    popup.style.transform = 'translateX(-50%) translateY(-35px) scale(1.2)';
+    popup.style.opacity = '0';
+  });
+
+  setTimeout(() => {
+    if (popup.parentNode) popup.parentNode.removeChild(popup);
+  }, 950);
 }
 
 function applyPlayerTheme(player) {
@@ -295,9 +325,27 @@ joinForm.addEventListener('submit', (e) => {
   });
 });
 
+// Socket Event: Join Pending Host Approval
+socket.on('join_pending', (data) => {
+  showView('waiting');
+  const subText = document.getElementById('waiting-sub-text');
+  if (subText) {
+    subText.textContent = `Racer "${data.name}" is waiting for host approval on the Big Screen.`;
+  }
+});
+
+// Socket Event: Join Rejected
+socket.on('join_rejected', (data) => {
+  showView('join');
+  if (errorMsg) {
+    errorMsg.textContent = data.message || 'Host declined your join request.';
+  }
+});
+
 socket.on('joined_success', (data) => {
   localPlayer = data.player;
   currentGameState = data.gameState || 'LOBBY';
+  lastKnownScore = data.player.score || 0;
 
   localStorage.setItem(STORAGE_KEYS.PLAYER_ID, localPlayer.id);
   localStorage.setItem(STORAGE_KEYS.PLAYER_NAME, localPlayer.name);
@@ -316,6 +364,25 @@ socket.on('joined_success', (data) => {
   } else {
     showView('lobby');
     if (countdownOverlay) countdownOverlay.classList.add('hidden');
+  }
+});
+
+// Socket Event: Hazard Hit (-10 pts)
+socket.on('hazard_hit', (data) => {
+  triggerHaptic([150, 50, 150]);
+  document.body.classList.add('hazard-flash');
+  setTimeout(() => document.body.classList.remove('hazard-flash'), 500);
+
+  if (hudMission) {
+    const oldText = hudMission.textContent;
+    hudMission.textContent = data.message || '💥 HIT BY HAZARD (-10 PTS)!';
+    hudMission.style.color = '#FF0055';
+    setTimeout(() => {
+      if (hudMission) {
+        hudMission.textContent = oldText;
+        hudMission.style.color = '#00F0FF';
+      }
+    }, 2000);
   }
 });
 
@@ -418,9 +485,20 @@ socket.on('anomaly_start', (data) => {
 socket.on('player_hud', (data) => {
   if (!data) return;
 
+  // Track score changes and show floating feedback popup
+  const currentScore = data.score || 0;
+  if (lastKnownScore > 0 && currentScore > lastKnownScore) {
+    const delta = currentScore - lastKnownScore;
+    showPhoneScorePopup(`+${delta} PTS`, '#39FF14');
+  } else if (lastKnownScore > 0 && currentScore < lastKnownScore) {
+    const delta = lastKnownScore - currentScore;
+    showPhoneScorePopup(`-${delta} PTS`, '#FF0055');
+  }
+  lastKnownScore = currentScore;
+
   // Update Rank & Score
   if (hudRank) hudRank.textContent = `#${data.rank || 1}`;
-  if (hudScore) hudScore.textContent = `${data.score || 0}`;
+  if (hudScore) hudScore.textContent = `${currentScore}`;
 
   // Update Match Timer
   if (hudTimer && data.timeRemaining !== undefined) {

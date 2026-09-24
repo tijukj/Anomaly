@@ -137,8 +137,22 @@ const gameManager = new GameManager(io);
 io.on('connection', (socket) => {
   socket.emit('game_state_update', gameManager.getPublicState());
 
+  // Player asks to join / rejoin (queued for host approval)
   socket.on('join_game', (payload) => {
-    gameManager.registerOrReconnectPlayer(socket, payload || {});
+    gameManager.requestPlayerJoin(socket, payload || {});
+  });
+
+  // Host approval actions
+  socket.on('approve_join', (data) => {
+    gameManager.approvePlayerJoin(data && data.requestId);
+  });
+
+  socket.on('reject_join', (data) => {
+    gameManager.rejectPlayerJoin(data && data.requestId);
+  });
+
+  socket.on('approve_all_joins', () => {
+    gameManager.approveAllJoins();
   });
 
   socket.on('player_input', (inputData) => {

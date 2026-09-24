@@ -133,54 +133,54 @@ export const SECRET_PASSAGE_WALL = {
   colorNum: 0xff0055
 };
 
-// Candidate POI Pools for Seeded Match Placement
+// Candidate POI Pools for Seeded Match Placement (100% Verified Collision-Free from Walls)
 export const POI_POOLS = {
   treasures: [
-    { id: 't1', region: 'forest', x: 190, y: 270, tier: 'common' },
-    { id: 't2', region: 'forest', x: 260, y: 150, tier: 'common' },
-    { id: 't3', region: 'forest', x: 100, y: 470, tier: 'rare' },
-    { id: 't4', region: 'forest', x: 380, y: 350, tier: 'common' },
-    { id: 't5', region: 'forest', x: 180, y: 720, tier: 'rare' },
-    { id: 't6', region: 'forest', x: 340, y: 900, tier: 'epic' },
-    { id: 't7', region: 'ruins', x: 650, y: 200, tier: 'common' },
-    { id: 't8', region: 'ruins', x: 890, y: 200, tier: 'rare' },
-    { id: 't9', region: 'ruins', x: 790, y: 280, tier: 'common' },
-    { id: 't10', region: 'ruins', x: 920, y: 380, tier: 'rare' },
-    { id: 't11', region: 'castle', x: 1180, y: 140, tier: 'rare' },
-    { id: 't12', region: 'castle', x: 1440, y: 140, tier: 'epic' },
-    { id: 't13', region: 'castle', x: 1310, y: 230, tier: 'epic' },
-    { id: 't14', region: 'castle', x: 1440, y: 350, tier: 'rare' },
-    { id: 't15', region: 'cave', x: 1200, y: 700, tier: 'rare' },
-    { id: 't16', region: 'cave', x: 1340, y: 690, tier: 'rare' },
-    { id: 't17', region: 'cave', x: 1280, y: 800, tier: 'epic' },
-    { id: 't18', region: 'cave', x: 1470, y: 880, tier: 'epic' },
-    { id: 't19', region: 'plaza', x: 790, y: 740, tier: 'common' },
-    { id: 't20', region: 'plaza', x: 670, y: 860, tier: 'common' }
+    { id: 't1', region: 'forest', x: 80, y: 80, tier: 'common' },
+    { id: 't2', region: 'forest', x: 480, y: 120, tier: 'common' },
+    { id: 't3', region: 'forest', x: 280, y: 260, tier: 'rare' },
+    { id: 't4', region: 'forest', x: 450, y: 410, tier: 'common' },
+    { id: 't5', region: 'forest', x: 190, y: 510, tier: 'rare' },
+    { id: 't6', region: 'forest', x: 180, y: 560, tier: 'epic' },
+    { id: 't7', region: 'ruins', x: 580, y: 80, tier: 'common' },
+    { id: 't8', region: 'ruins', x: 1020, y: 180, tier: 'rare' },
+    { id: 't9', region: 'ruins', x: 760, y: 220, tier: 'common' },
+    { id: 't10', region: 'ruins', x: 800, y: 280, tier: 'rare' },
+    { id: 't11', region: 'castle', x: 1190, y: 150, tier: 'rare' },
+    { id: 't12', region: 'castle', x: 1210, y: 190, tier: 'epic' },
+    { id: 't13', region: 'castle', x: 1410, y: 230, tier: 'epic' },
+    { id: 't14', region: 'castle', x: 1200, y: 270, tier: 'rare' },
+    { id: 't15', region: 'cave', x: 1080, y: 600, tier: 'rare' },
+    { id: 't16', region: 'cave', x: 1480, y: 600, tier: 'rare' },
+    { id: 't17', region: 'cave', x: 1500, y: 720, tier: 'epic' },
+    { id: 't18', region: 'cave', x: 1190, y: 770, tier: 'epic' },
+    { id: 't19', region: 'plaza', x: 650, y: 620, tier: 'common' },
+    { id: 't20', region: 'plaza', x: 880, y: 650, tier: 'common' }
   ],
   chests: [
-    { id: 'ch1', region: 'forest', x: 440, y: 290 },
-    { id: 'ch2', region: 'ruins', x: 790, y: 360 },
-    { id: 'ch3', region: 'castle', x: 1210, y: 230 },
-    { id: 'ch4', region: 'cave', x: 1330, y: 790 },
-    { id: 'ch5', region: 'plaza', x: 890, y: 740 }
+    { id: 'ch1', region: 'forest', x: 280, y: 100 },
+    { id: 'ch2', region: 'ruins', x: 900, y: 80 },
+    { id: 'ch3', region: 'castle', x: 1200, y: 170 },
+    { id: 'ch4', region: 'cave', x: 1280, y: 600 },
+    { id: 'ch5', region: 'plaza', x: 900, y: 630 }
   ],
   vaults: [
-    { id: 'v1', region: 'ruins', x: 790, y: 180, name: 'Sunken Vault' },
-    { id: 'v2', region: 'castle', x: 1310, y: 340, name: 'Citadel Vault' },
-    { id: 'v3', region: 'cave', x: 1460, y: 800, name: 'Obsidian Vault' }
+    { id: 'v1', region: 'ruins', x: 720, y: 200, name: 'Sunken Vault' },
+    { id: 'v2', region: 'castle', x: 1410, y: 210, name: 'Citadel Vault' },
+    { id: 'v3', region: 'cave', x: 1340, y: 680, name: 'Obsidian Vault' }
   ],
   keys: [
-    { id: 'k1', region: 'forest', x: 280, y: 860 },
-    { id: 'k2', region: 'ruins', x: 630, y: 160 },
-    { id: 'k3', region: 'cave', x: 1150, y: 710 }
+    { id: 'k1', region: 'forest', x: 90, y: 170 },
+    { id: 'k2', region: 'ruins', x: 780, y: 250 },
+    { id: 'k3', region: 'cave', x: 1520, y: 740 }
   ],
   clues: [
-    { id: 'c1', region: 'forest', x: 300, y: 310 },
-    { id: 'c2', region: 'forest', x: 120, y: 760 },
-    { id: 'c3', region: 'ruins', x: 710, y: 270 },
-    { id: 'c4', region: 'ruins', x: 870, y: 270 },
-    { id: 'c5', region: 'castle', x: 1200, y: 330 },
-    { id: 'c6', region: 'cave', x: 1190, y: 780 }
+    { id: 'c1', region: 'forest', x: 460, y: 330 },
+    { id: 'c2', region: 'forest', x: 400, y: 480 },
+    { id: 'c3', region: 'ruins', x: 620, y: 330 },
+    { id: 'c4', region: 'ruins', x: 580, y: 370 },
+    { id: 'c5', region: 'castle', x: 1190, y: 250 },
+    { id: 'c6', region: 'cave', x: 1470, y: 790 }
   ],
   missions: [
     { id: 'm1', region: 'forest', label: 'Explore the Neon Forest' },
@@ -189,25 +189,25 @@ export const POI_POOLS = {
     { id: 'm4', region: 'cave', label: 'Survive the Obsidian Cave' }
   ],
   secretSwitches: [
-    { id: 'sw1', region: 'cave', x: 1150, y: 890, target: 'secret_door' },
-    { id: 'sw2', region: 'ruins', x: 630, y: 290, target: 'secret_door' },
-    { id: 'sw3', region: 'forest', x: 440, y: 840, target: 'secret_door' }
+    { id: 'sw1', region: 'cave', x: 1510, y: 810, target: 'secret_door' },
+    { id: 'sw2', region: 'ruins', x: 600, y: 350, target: 'secret_door' },
+    { id: 'sw3', region: 'forest', x: 390, y: 530, target: 'secret_door' }
   ],
   portalPairs: [
     {
       id: 'portal_pair_1',
-      a: { region: 'forest', x: 440, y: 120, colorNum: 0x00f0ff },
-      b: { region: 'cave', x: 1100, y: 920, colorNum: 0x00f0ff }
+      a: { region: 'forest', x: 380, y: 580, colorNum: 0x00f0ff },
+      b: { region: 'cave', x: 1500, y: 840, colorNum: 0x00f0ff }
     },
     {
       id: 'portal_pair_2',
-      a: { region: 'ruins', x: 590, y: 380, colorNum: 0xff00cc },
-      b: { region: 'castle', x: 1460, y: 120, colorNum: 0xff00cc }
+      a: { region: 'ruins', x: 1010, y: 380, colorNum: 0xff00cc },
+      b: { region: 'castle', x: 1210, y: 290, colorNum: 0xff00cc }
     }
   ],
   merchants: [
-    { id: 'merc_1', region: 'plaza', x: 740, y: 640, name: 'CYBER-MERCHANT' },
-    { id: 'merc_2', region: 'forest', x: 430, y: 410, name: 'FOREST-BROKER' },
-    { id: 'merc_3', region: 'castle', x: 1180, y: 380, name: 'CITADEL-ARMS' }
+    { id: 'merc_1', region: 'plaza', x: 750, y: 680, name: 'CYBER-MERCHANT' },
+    { id: 'merc_2', region: 'forest', x: 340, y: 610, name: 'FOREST-BROKER' },
+    { id: 'merc_3', region: 'castle', x: 1410, y: 310, name: 'CITADEL-ARMS' }
   ]
 };

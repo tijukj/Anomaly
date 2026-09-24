@@ -47,8 +47,10 @@ socket.on('connect_error', (err) => {
   console.warn('[Host] Connection error:', err);
 });
 
-const WORLD_WIDTH = 1600;
+// Widescreen 2200x1000 Canvas: Left Sidebar (0-280), Center Arena (300-1900), Right Sidebar (1920-2200)
+const WORLD_WIDTH = 2200;
 const WORLD_HEIGHT = 1000;
+const ARENA_OFFSET_X = 300;
 
 let serverInfo = {
   publicUrl: '',
@@ -68,6 +70,7 @@ let currentGameState = {
   phaseIndex: 0,
   phase: { name: 'PHASE 1: DISCOVERY', colorHex: '#00F0FF' },
   clueState: null,
+  pendingRequests: [],
   map: null
 };
 
@@ -163,6 +166,28 @@ class SoundEngine {
       gain.connect(this.ctx.destination);
       osc.start(t);
       osc.stop(t + dur);
+    } catch (e) {}
+  }
+
+  playHazardHit() {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    try {
+      const t = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(160, t);
+      osc.frequency.linearRampToValueAtTime(80, t + 0.25);
+
+      gain.gain.setValueAtTime(0.22, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.3);
     } catch (e) {}
   }
 
@@ -323,17 +348,20 @@ class HostScene extends Phaser.Scene {
     super({ key: 'HostScene' });
     this.playerMap = new Map();
     this.interactablesGraphics = null;
+    this.sentinelsGraphics = null;
     this.hudContainer = null;
     this.countdownContainer = null;
     this.endedContainer = null;
     this.leaderboardContainer = null;
     this.cluesPanelContainer = null;
     this.eventFeedContainer = null;
+    this.joinRequestContainer = null;
     this.celebrationContainer = null;
     this.debugContainer = null;
     this.poiDebugContainer = null;
     this.soundStatusText = null;
     this.hostEvents = [];
+    this.pendingRequests = [];
     this.lastRenderedState = '';
   }
 
@@ -355,15 +383,25 @@ class HostScene extends Phaser.Scene {
     this.mapGraphics = this.add.graphics();
     this.wallsGraphics = this.add.graphics();
     this.interactablesGraphics = this.add.graphics();
+    this.sentinelsGraphics = this.add.graphics();
     this.labelsContainer = this.add.container(0, 0);
     this.fxContainer = this.add.container(0, 0);
-    this.hudContainer = this.add.container(0, 0);
+
+    // Left Column: Live Commentary Feed & Match Badges
+    this.eventFeedContainer = this.add.container(25, 30);
+
+    // Center Top: Digital Clock & Anomaly Banner
+    this.hudContainer = this.add.container(1100, 24);
+    this.anomalyContainer = this.add.container(1100, 85);
+    this.joinRequestContainer = this.add.container(1100, 140);
     this.countdownContainer = this.add.container(0, 0);
     this.endedContainer = this.add.container(0, 0);
-    this.leaderboardContainer = this.add.container(0, 0);
-    this.cluesPanelContainer = this.add.container(1350, 310);
-    this.eventFeedContainer = this.add.container(45, WORLD_HEIGHT - 210);
-    this.anomalyContainer = this.add.container(680, 85);
+
+    // Right Column: Leaderboard, Known Clues & Controls
+    this.leaderboardContainer = this.add.container(1930, 30);
+    this.cluesPanelContainer = this.add.container(1930, 320);
+    this.controlsContainer = this.add.container(1930, 830);
+
     this.crownContainer = this.add.container(0, 0);
     this.fogGraphics = this.add.graphics();
     this.celebrationContainer = this.add.container(0, 0);
@@ -373,11 +411,16 @@ class HostScene extends Phaser.Scene {
     this.debugContainer = this.add.container(20, 20);
 
     // Set depths
+    this.sentinelsGraphics.setDepth(25);
     this.fogGraphics.setDepth(48);
     this.crownContainer.setDepth(52);
-    this.eventFeedContainer.setDepth(60);
     this.cluesPanelContainer.setDepth(55);
+    this.eventFeedContainer.setDepth(60);
+    this.leaderboardContainer.setDepth(60);
+    this.controlsContainer.setDepth(60);
+    this.hudContainer.setDepth(110);
     this.anomalyContainer.setDepth(120);
+    this.joinRequestContainer.setDepth(140);
     this.celebrationContainer.setDepth(300);
 
     // Fallback Image loader to guarantee QR image is loaded and added to textures
@@ -398,10 +441,25 @@ class HostScene extends Phaser.Scene {
 
     // Keyboard controls
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.spaceKey.on('down', () => this.triggerStartMatch());
+    this.spaceKey.on('down', () => {
+      if (this.pendingRequests.length > 0) {
+        this.approveNextJoinRequest();
+      } else {
+        this.triggerStartMatch();
+      }
+    });
+
+    this.aKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+    this.aKey.on('down', () => this.approveNextJoinRequest());
 
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    this.escKey.on('down', () => this.triggerStopMatch());
+    this.escKey.on('down', () => {
+      if (this.pendingRequests.length > 0) {
+        this.rejectNextJoinRequest();
+      } else {
+        this.triggerStopMatch();
+      }
+    });
 
     this.rKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.rKey.on('down', () => this.triggerResetMatch());
@@ -440,6 +498,10 @@ class HostScene extends Phaser.Scene {
       if (prevState !== state.state) {
         this.onStateChanged(state.state);
       }
+      if (state.pendingRequests) {
+        this.pendingRequests = state.pendingRequests;
+        this.renderJoinRequests(state.pendingRequests);
+      }
       this.renderLobbyUI();
       this.updatePlayerRoster(state.players);
 
@@ -447,11 +509,21 @@ class HostScene extends Phaser.Scene {
         this.drawFullMap();
         this.renderPoiMarkers();
         this.renderRunningHUD();
+        this.renderControlsPanel();
         if (state.clueState) {
           this.drawKnownCluesPanel(state.clueState.knownClues, state.clueState.chainTitle, state.clueState);
         }
       } else if (state.state === 'ENDED') {
         this.renderEndedScreen();
+      }
+    });
+
+    // Socket Event: Pending join requests list update
+    socket.on('pending_join_requests', (data) => {
+      this.pendingRequests = data.requests || [];
+      this.renderJoinRequests(this.pendingRequests);
+      if (currentGameState.state === 'LOBBY') {
+        this.renderLobbyUI();
       }
     });
 
@@ -472,18 +544,24 @@ class HostScene extends Phaser.Scene {
     socket.on('score_popup', (event) => {
       if (currentGameState.state === 'RUNNING') {
         this.spawnScorePopup(event);
-        const rarity = event.amount >= 50 ? 'epic' : (event.amount >= 20 ? 'rare' : 'common');
-        sounds.playCollect(rarity);
+        if (event.amount < 0) {
+          sounds.playHazardHit();
+        } else {
+          const rarity = event.amount >= 50 ? 'epic' : (event.amount >= 20 ? 'rare' : 'common');
+          sounds.playCollect(rarity);
+        }
       }
     });
 
-    // Socket Event: Host Event Feed (Missions, Glitch treasures, Keys, Vaults)
+    // Socket Event: Host Event Feed (Missions, Glitch treasures, Keys, Vaults, Hazards)
     socket.on('host_event', (event) => {
       this.addHostEvent(event);
       if (event.type === 'mission_complete') {
         sounds.playMissionComplete();
       } else if (event.type === 'crown_stolen') {
         sounds.playCrownSteal();
+      } else if (event.type === 'hazard_hit') {
+        sounds.playHazardHit();
       }
     });
 
@@ -550,9 +628,6 @@ class HostScene extends Phaser.Scene {
     this.setupDebugOverlay();
     this.debugContainer.setVisible(showDebugOverlay);
     this.poiDebugContainer.setVisible(showPoiDebugMarkers);
-    this.eventFeedContainer.setDepth(60);
-    this.cluesPanelContainer.setDepth(55);
-    this.celebrationContainer.setDepth(300);
   }
 
   updateSoundStatusBadge(isMuted) {
@@ -562,77 +637,165 @@ class HostScene extends Phaser.Scene {
     }
   }
 
+  approveNextJoinRequest() {
+    if (this.pendingRequests.length > 0) {
+      const first = this.pendingRequests[0];
+      socket.emit('approve_join', { requestId: first.requestId });
+    }
+  }
+
+  rejectNextJoinRequest() {
+    if (this.pendingRequests.length > 0) {
+      const first = this.pendingRequests[0];
+      socket.emit('reject_join', { requestId: first.requestId });
+    }
+  }
+
+  approveAllJoinRequests() {
+    socket.emit('approve_all_joins');
+  }
+
+  // Render Join Approval Prompt on Host Screen
+  renderJoinRequests(requests = []) {
+    this.joinRequestContainer.removeAll(true);
+    if (!requests || requests.length === 0) return;
+
+    const count = requests.length;
+    const first = requests[0];
+    const boxW = 560;
+    const boxH = 68;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x050518, 0.98);
+    bg.fillRoundedRect(-boxW / 2, -boxH / 2, boxW, boxH, 12);
+    bg.lineStyle(2.5, 0x39FF14, 1);
+    bg.strokeRoundedRect(-boxW / 2, -boxH / 2, boxW, boxH, 12);
+    this.joinRequestContainer.add(bg);
+
+    const title = this.add.text(-boxW / 2 + 20, -12, `⚡ JOIN REQUEST (${count}): "${first.name}"`, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '17px',
+      color: '#39FF14',
+      letterSpacing: 1.5
+    }).setOrigin(0, 0.5);
+
+    const sub = this.add.text(-boxW / 2 + 20, 14, first.isRejoin ? 'Rejoining racer' : 'New racer requesting admission', {
+      fontFamily: 'sans-serif',
+      fontSize: '11px',
+      color: '#AAAAFF'
+    }).setOrigin(0, 0.5);
+
+    // Approve Button
+    const btnApprove = this.add.graphics();
+    btnApprove.fillStyle(0x39FF14, 1);
+    btnApprove.fillRoundedRect(boxW / 2 - 200, -22, 90, 44, 8);
+    this.joinRequestContainer.add(btnApprove);
+
+    const appText = this.add.text(boxW / 2 - 155, 0, 'ADMIT (A)', {
+      fontFamily: 'sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#050510'
+    }).setOrigin(0.5);
+
+    const appZone = this.add.zone(boxW / 2 - 155, 0, 90, 44).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    appZone.on('pointerdown', () => this.approveNextJoinRequest());
+
+    // Admit All Button (if multiple)
+    if (count > 1) {
+      const btnAll = this.add.graphics();
+      btnAll.fillStyle(0x00F0FF, 1);
+      btnAll.fillRoundedRect(boxW / 2 - 100, -22, 90, 44, 8);
+      this.joinRequestContainer.add(btnAll);
+
+      const allText = this.add.text(boxW / 2 - 55, 0, `ALL (${count})`, {
+        fontFamily: 'sans-serif',
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: '#050510'
+      }).setOrigin(0.5);
+
+      const allZone = this.add.zone(boxW / 2 - 55, 0, 90, 44).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      allZone.on('pointerdown', () => this.approveAllJoinRequests());
+      this.joinRequestContainer.add([allText, allZone]);
+    }
+
+    this.joinRequestContainer.add([title, sub, appText, appZone]);
+  }
+
   addHostEvent(event) {
-    // Keep last 6 events with newest on top
+    // Keep last 8 events with newest on top
     this.hostEvents.unshift(event);
-    if (this.hostEvents.length > 6) {
+    if (this.hostEvents.length > 8) {
       this.hostEvents.pop();
     }
     this.renderEventFeed();
   }
 
+  // Left Column: Live Commentary Feed (Completely outside map)
   renderEventFeed() {
     this.eventFeedContainer.removeAll(true);
-    if (currentGameState.state !== 'RUNNING' || this.hostEvents.length === 0) return;
+    if (this.hostEvents.length === 0) return;
+
+    const width = 250;
+    const count = this.hostEvents.length;
+    const boxH = 40 + count * 48;
 
     const bg = this.add.graphics();
-    const count = this.hostEvents.length;
-    const boxH = 34 + count * 26;
-    const boxW = 420;
-
-    bg.fillStyle(0x0a0a1e, 0.9);
-    bg.fillRoundedRect(0, 0, boxW, boxH, 8);
-    bg.lineStyle(1.5, 0x00F0FF, 0.6);
-    bg.strokeRoundedRect(0, 0, boxW, boxH, 8);
+    bg.fillStyle(0x0a0a1e, 0.92);
+    bg.fillRoundedRect(0, 0, width, boxH, 10);
+    bg.lineStyle(1.5, 0x00F0FF, 0.7);
+    bg.strokeRoundedRect(0, 0, width, boxH, 10);
     this.eventFeedContainer.add(bg);
 
-    const title = this.add.text(12, 9, '[ LIVE COMMENTARY FEED ]', {
+    const title = this.add.text(12, 14, '[ LIVE MATCH FEED ]', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: '12px',
+      fontSize: '13px',
       color: '#00F0FF',
       letterSpacing: 1.5
     });
     this.eventFeedContainer.add(title);
 
     this.hostEvents.forEach((ev, idx) => {
-      const lineY = 32 + idx * 26;
-      const text = this.add.text(14, lineY, ev.text || '', {
+      const lineY = 42 + idx * 48;
+      const text = this.add.text(12, lineY, ev.text || '', {
         fontFamily: 'sans-serif',
         fontSize: '11px',
         fontStyle: 'bold',
         color: ev.colorHex || '#FFFFFF',
-        wordWrap: { width: boxW - 28 }
+        wordWrap: { width: width - 24 },
+        lineSpacing: 2
       });
       this.eventFeedContainer.add(text);
     });
   }
 
-  // Draw Public "Known Clues" Panel on Host Screen (Right Sidebar)
+  // Right Column: Public "Known Clues" Panel (Completely outside map)
   drawKnownCluesPanel(knownClues = [], chainTitle = '', clueState = null) {
     this.cluesPanelContainer.removeAll(true);
     if (currentGameState.state !== 'RUNNING') return;
 
-    const width = 210;
+    const width = 240;
     const cluesList = knownClues || [];
     const boxH = 50 + Math.max(1, cluesList.length) * 44;
 
     const bg = this.add.graphics();
-    bg.fillStyle(0x0a0a1e, 0.9);
-    bg.fillRoundedRect(0, 0, width, boxH, 8);
-    bg.lineStyle(1.5, 0xFFE600, 0.7);
-    bg.strokeRoundedRect(0, 0, width, boxH, 8);
+    bg.fillStyle(0x0a0a1e, 0.92);
+    bg.fillRoundedRect(0, 0, width, boxH, 10);
+    bg.lineStyle(1.5, 0xFFE600, 0.75);
+    bg.strokeRoundedRect(0, 0, width, boxH, 10);
     this.cluesPanelContainer.add(bg);
 
-    const header = this.add.text(10, 12, `KNOWN CLUES (${cluesList.length}/3)`, {
+    const header = this.add.text(12, 14, `KNOWN CLUES (${cluesList.length}/3)`, {
       fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: '12px',
+      fontSize: '13px',
       color: '#FFE600',
       letterSpacing: 1
     });
     this.cluesPanelContainer.add(header);
 
     if (cluesList.length === 0) {
-      const hint = this.add.text(10, 36, 'Awakens at 6:00 (Hunt)...', {
+      const hint = this.add.text(12, 38, 'Awakens at 6:00 (Hunt)...', {
         fontFamily: 'sans-serif',
         fontSize: '11px',
         fontStyle: 'italic',
@@ -641,15 +804,15 @@ class HostScene extends Phaser.Scene {
       this.cluesPanelContainer.add(hint);
     } else {
       cluesList.forEach((clue, idx) => {
-        const itemY = 34 + idx * 42;
-        const clueBadge = this.add.text(10, itemY, `✓ CLUE #${clue.step}: ${clue.shortHint || clue.region.toUpperCase()}`, {
+        const itemY = 36 + idx * 42;
+        const clueBadge = this.add.text(12, itemY, `✓ #${clue.step}: ${clue.shortHint || clue.region.toUpperCase()}`, {
           fontFamily: 'sans-serif',
-          fontSize: '10px',
+          fontSize: '11px',
           fontStyle: 'bold',
           color: '#00F0FF'
         });
 
-        const finder = this.add.text(10, itemY + 16, `Found by: ${clue.discoverer}`, {
+        const finder = this.add.text(12, itemY + 18, `By: ${clue.discoverer}`, {
           fontFamily: 'sans-serif',
           fontSize: '10px',
           color: clue.colorHex || '#FFFFFF'
@@ -660,9 +823,50 @@ class HostScene extends Phaser.Scene {
     }
   }
 
+  // Right Column: Controls & Actions Panel
+  renderControlsPanel() {
+    this.controlsContainer.removeAll(true);
+    if (currentGameState.state !== 'RUNNING') return;
+
+    const width = 240;
+    const boxH = 135;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0a0a1e, 0.92);
+    bg.fillRoundedRect(0, 0, width, boxH, 10);
+    bg.lineStyle(1.5, 0xFF0055, 0.7);
+    bg.strokeRoundedRect(0, 0, width, boxH, 10);
+    this.controlsContainer.add(bg);
+
+    const title = this.add.text(12, 12, 'MATCH CONTROLS', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '12px',
+      color: '#FF0055',
+      letterSpacing: 1.5
+    });
+
+    const shortcuts = [
+      '[ A ] Approve Racers',
+      '[ S ] Toggle Sound',
+      '[ R ] Reset Match',
+      '[ ESC ] Return to Lobby'
+    ];
+
+    shortcuts.forEach((sc, idx) => {
+      const text = this.add.text(12, 34 + idx * 22, sc, {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: '#FFFFFF'
+      });
+      this.controlsContainer.add(text);
+    });
+
+    this.controlsContainer.add(title);
+  }
+
   // Large 6-Second Public Clue Discovery Banner
   showPublicClueBanner(data) {
-    const banner = this.add.container(WORLD_WIDTH / 2, -140);
+    const banner = this.add.container(1100, -140);
 
     const bg = this.add.graphics();
     bg.fillStyle(0x050518, 0.96);
@@ -696,7 +900,6 @@ class HostScene extends Phaser.Scene {
     banner.add([bg, title, clueText, sub]);
     banner.setDepth(250);
 
-    // Slide down, stay for 6 seconds, slide up
     this.tweens.add({
       targets: banner,
       y: 150,
@@ -718,7 +921,7 @@ class HostScene extends Phaser.Scene {
 
   // Final Revelation Banner (8:00 Mark)
   showFinalRevelationBanner(data) {
-    const banner = this.add.container(WORLD_WIDTH / 2, -140);
+    const banner = this.add.container(1100, -140);
 
     const bg = this.add.graphics();
     bg.fillStyle(0x180028, 0.96);
@@ -763,7 +966,7 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Grand Full-Screen Celebration on Legendary Treasure Claim (+150 pts)
+  // Grand Celebration on Legendary Treasure Claim (+150 pts)
   showLegendaryFoundCelebration(data) {
     this.celebrationContainer.removeAll(true);
 
@@ -807,7 +1010,6 @@ class HostScene extends Phaser.Scene {
 
     this.celebrationContainer.add([trophy, title, winner, pts]);
 
-    // Auto dismiss celebration after 6.5s
     this.time.delayedCall(6500, () => {
       this.tweens.add({
         targets: this.celebrationContainer,
@@ -853,6 +1055,7 @@ class HostScene extends Phaser.Scene {
       this.drawFullMap();
       this.renderPoiMarkers();
       this.renderRunningHUD();
+      this.renderControlsPanel();
     } else if (newState === 'ENDED') {
       this.countdownContainer.setVisible(false);
       this.endedContainer.setVisible(true);
@@ -866,12 +1069,14 @@ class HostScene extends Phaser.Scene {
       this.hudContainer.removeAll(true);
       this.eventFeedContainer.removeAll(true);
       this.cluesPanelContainer.removeAll(true);
+      this.controlsContainer.removeAll(true);
       this.celebrationContainer.removeAll(true);
       this.hostEvents = [];
       this.clearAllPlayerEntities();
       this.mapGraphics.clear();
       this.wallsGraphics.clear();
       this.interactablesGraphics.clear();
+      this.sentinelsGraphics.clear();
       this.labelsContainer.removeAll(true);
       this.drawBackgroundGrid();
       this.renderLobbyUI();
@@ -883,7 +1088,7 @@ class HostScene extends Phaser.Scene {
     this.bgGraphics.fillStyle(0x070714, 1);
     this.bgGraphics.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
-    // Subtle neon grid lines
+    // Subtle neon grid lines across entire widescreen canvas
     this.bgGraphics.lineStyle(1, 0x141432, 0.4);
     const gridSize = 40;
     for (let x = 0; x < WORLD_WIDTH; x += gridSize) {
@@ -894,19 +1099,22 @@ class HostScene extends Phaser.Scene {
     }
   }
 
+  // Draw Center Arena Map with 300px horizontal offset
   drawFullMap() {
     this.mapGraphics.clear();
     this.wallsGraphics.clear();
     this.labelsContainer.removeAll(true);
 
+    const ox = ARENA_OFFSET_X;
+
     // 1. Draw 4 Themed Neon Regions
     // Forest (Large West)
     this.mapGraphics.fillStyle(0x002211, 0.6);
-    this.mapGraphics.fillRoundedRect(40, 40, 480, 920, 16);
+    this.mapGraphics.fillRoundedRect(ox + 40, 40, 480, 920, 16);
     this.mapGraphics.lineStyle(2, 0x00FF66, 0.5);
-    this.mapGraphics.strokeRoundedRect(40, 40, 480, 920, 16);
+    this.mapGraphics.strokeRoundedRect(ox + 40, 40, 480, 920, 16);
 
-    const forestLabel = this.add.text(280, 75, 'NEON FOREST', {
+    const forestLabel = this.add.text(ox + 280, 75, 'NEON FOREST', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#00FF66',
@@ -916,11 +1124,11 @@ class HostScene extends Phaser.Scene {
 
     // Ruins (Center-North)
     this.mapGraphics.fillStyle(0x221100, 0.6);
-    this.mapGraphics.fillRoundedRect(560, 40, 480, 400, 16);
+    this.mapGraphics.fillRoundedRect(ox + 560, 40, 480, 400, 16);
     this.mapGraphics.lineStyle(2, 0xFF9900, 0.5);
-    this.mapGraphics.strokeRoundedRect(560, 40, 480, 400, 16);
+    this.mapGraphics.strokeRoundedRect(ox + 560, 40, 480, 400, 16);
 
-    const ruinsLabel = this.add.text(800, 95, 'ANCIENT RUINS', {
+    const ruinsLabel = this.add.text(ox + 800, 95, 'ANCIENT RUINS', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#FF9900',
@@ -930,11 +1138,11 @@ class HostScene extends Phaser.Scene {
 
     // Castle (North-East, Walled)
     this.mapGraphics.fillStyle(0x051133, 0.6);
-    this.mapGraphics.fillRoundedRect(1080, 40, 480, 420, 16);
+    this.mapGraphics.fillRoundedRect(ox + 1080, 40, 480, 420, 16);
     this.mapGraphics.lineStyle(2, 0x3377FF, 0.5);
-    this.mapGraphics.strokeRoundedRect(1080, 40, 480, 420, 16);
+    this.mapGraphics.strokeRoundedRect(ox + 1080, 40, 480, 420, 16);
 
-    const castleLabel = this.add.text(1300, 105, 'CITADEL CASTLE', {
+    const castleLabel = this.add.text(ox + 1300, 105, 'CITADEL CASTLE', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#3377FF',
@@ -944,11 +1152,11 @@ class HostScene extends Phaser.Scene {
 
     // Cave (South-East, Narrow/Risky)
     this.mapGraphics.fillStyle(0x220022, 0.6);
-    this.mapGraphics.fillRoundedRect(1060, 580, 500, 380, 16);
+    this.mapGraphics.fillRoundedRect(ox + 1060, 580, 500, 380, 16);
     this.mapGraphics.lineStyle(2, 0xCC00FF, 0.5);
-    this.mapGraphics.strokeRoundedRect(1060, 580, 500, 380, 16);
+    this.mapGraphics.strokeRoundedRect(ox + 1060, 580, 500, 380, 16);
 
-    const caveLabel = this.add.text(1310, 925, 'OBSIDIAN CAVE', {
+    const caveLabel = this.add.text(ox + 1310, 925, 'OBSIDIAN CAVE', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '22px',
       color: '#CC00FF',
@@ -958,12 +1166,12 @@ class HostScene extends Phaser.Scene {
 
     // 2. Cyber River (Winding band across middle)
     this.mapGraphics.fillStyle(0x002233, 0.85);
-    this.mapGraphics.fillRect(40, 470, 1520, 120);
+    this.mapGraphics.fillRect(ox + 40, 470, 1520, 120);
     this.mapGraphics.lineStyle(2, 0x00CCFF, 0.6);
-    this.mapGraphics.lineBetween(40, 470, 1560, 470);
-    this.mapGraphics.lineBetween(40, 590, 1560, 590);
+    this.mapGraphics.lineBetween(ox + 40, 470, ox + 1560, 470);
+    this.mapGraphics.lineBetween(ox + 40, 590, ox + 1560, 590);
 
-    const riverLabel = this.add.text(210, 530, 'CYBER RIVER [SLOWS MOVEMENT]', {
+    const riverLabel = this.add.text(ox + 210, 530, 'CYBER RIVER [SLOWS MOVEMENT]', {
       fontFamily: 'sans-serif',
       fontSize: '13px',
       fontStyle: 'bold',
@@ -974,25 +1182,25 @@ class HostScene extends Phaser.Scene {
 
     // 3. Bridges (Safe shortcuts across river)
     const bridges = [
-      { x: 380, name: 'WEST BRIDGE' },
-      { x: 740, name: 'PLAZA BRIDGE' },
-      { x: 1220, name: 'EAST BRIDGE' }
+      { x: ox + 380, name: 'WEST BRIDGE' },
+      { x: ox + 740, name: 'PLAZA BRIDGE' },
+      { x: ox + 1220, name: 'EAST BRIDGE' }
     ];
 
     bridges.forEach(b => {
       this.mapGraphics.fillStyle(0x141432, 1);
-      this.mapGraphics.fillRoundedRect(b.x, 460, b.x === 740 ? 120 : 80, 140, 6);
+      this.mapGraphics.fillRoundedRect(b.x, 460, b.x === ox + 740 ? 120 : 80, 140, 6);
       this.mapGraphics.lineStyle(2, 0x00F0FF, 0.9);
-      this.mapGraphics.strokeRoundedRect(b.x, 460, b.x === 740 ? 120 : 80, 140, 6);
+      this.mapGraphics.strokeRoundedRect(b.x, 460, b.x === ox + 740 ? 120 : 80, 140, 6);
     });
 
     // 4. Start Plaza (Central Hub)
     this.mapGraphics.fillStyle(0x0c0c24, 0.9);
-    this.mapGraphics.fillCircle(800, 530, 85);
+    this.mapGraphics.fillCircle(ox + 800, 530, 85);
     this.mapGraphics.lineStyle(3, 0x00F0FF, 0.8);
-    this.mapGraphics.strokeCircle(800, 530, 85);
+    this.mapGraphics.strokeCircle(ox + 800, 530, 85);
 
-    const plazaLabel = this.add.text(800, 530, 'START PLAZA', {
+    const plazaLabel = this.add.text(ox + 800, 530, 'START PLAZA', {
       fontFamily: 'sans-serif',
       fontSize: '12px',
       fontStyle: 'bold',
@@ -1005,165 +1213,107 @@ class HostScene extends Phaser.Scene {
     this.wallsGraphics.fillStyle(0x141432, 1);
     this.wallsGraphics.lineStyle(2, 0x00F0FF, 0.7);
 
-    // Outer Map Boundary
-    this.wallsGraphics.strokeRect(20, 20, 1560, 960);
+    // Outer Map Boundary Box
+    this.wallsGraphics.strokeRect(ox + 20, 20, 1560, 960);
 
     // Castle Fortress Walls
     this.wallsGraphics.fillStyle(0x101030, 1);
     this.wallsGraphics.lineStyle(2, 0x3377FF, 0.85);
 
     // North wall
-    this.wallsGraphics.fillRect(1120, 80, 400, 24);
-    this.wallsGraphics.strokeRect(1120, 80, 400, 24);
+    this.wallsGraphics.fillRect(ox + 1120, 80, 400, 24);
+    this.wallsGraphics.strokeRect(ox + 1120, 80, 400, 24);
     // East wall
-    this.wallsGraphics.fillRect(1496, 80, 24, 340);
-    this.wallsGraphics.strokeRect(1496, 80, 24, 340);
-    // South wall segments (Gate gap in middle)
-    this.wallsGraphics.fillRect(1120, 400, 160, 24);
-    this.wallsGraphics.strokeRect(1120, 400, 160, 24);
-    this.wallsGraphics.fillRect(1360, 400, 160, 24);
-    this.wallsGraphics.strokeRect(1360, 400, 160, 24);
-    // West wall segments (Gate gap in middle)
-    this.wallsGraphics.fillRect(1120, 80, 24, 120);
-    this.wallsGraphics.strokeRect(1120, 80, 24, 120);
-    this.wallsGraphics.fillRect(1120, 280, 24, 144);
-    this.wallsGraphics.strokeRect(1120, 280, 24, 144);
-    // Keep chamber walls with open doorway on south
-    this.wallsGraphics.fillRect(1250, 170, 120, 18);
-    this.wallsGraphics.strokeRect(1250, 170, 120, 18);
-    this.wallsGraphics.fillRect(1250, 170, 18, 120);
-    this.wallsGraphics.strokeRect(1250, 170, 18, 120);
-    this.wallsGraphics.fillRect(1352, 170, 18, 120);
-    this.wallsGraphics.strokeRect(1352, 170, 18, 120);
-    this.wallsGraphics.fillRect(1250, 272, 40, 18);
-    this.wallsGraphics.strokeRect(1250, 272, 40, 18);
-    this.wallsGraphics.fillRect(1330, 272, 40, 18);
-    this.wallsGraphics.strokeRect(1330, 272, 40, 18);
+    this.wallsGraphics.fillRect(ox + 1496, 80, 24, 340);
+    this.wallsGraphics.strokeRect(ox + 1496, 80, 24, 340);
+    // South wall segments
+    this.wallsGraphics.fillRect(ox + 1120, 400, 160, 24);
+    this.wallsGraphics.strokeRect(ox + 1120, 400, 160, 24);
+    this.wallsGraphics.fillRect(ox + 1360, 400, 160, 24);
+    this.wallsGraphics.strokeRect(ox + 1360, 400, 160, 24);
+    // West wall segments
+    this.wallsGraphics.fillRect(ox + 1120, 80, 24, 120);
+    this.wallsGraphics.strokeRect(ox + 1120, 80, 24, 120);
+    this.wallsGraphics.fillRect(ox + 1120, 280, 24, 144);
+    this.wallsGraphics.strokeRect(ox + 1120, 280, 24, 144);
+    // Keep chamber walls
+    this.wallsGraphics.fillRect(ox + 1250, 170, 120, 18);
+    this.wallsGraphics.strokeRect(ox + 1250, 170, 120, 18);
+    this.wallsGraphics.fillRect(ox + 1250, 170, 18, 120);
+    this.wallsGraphics.strokeRect(ox + 1250, 170, 18, 120);
+    this.wallsGraphics.fillRect(ox + 1352, 170, 18, 120);
+    this.wallsGraphics.strokeRect(ox + 1352, 170, 18, 120);
+    this.wallsGraphics.fillRect(ox + 1250, 272, 40, 18);
+    this.wallsGraphics.strokeRect(ox + 1250, 272, 40, 18);
+    this.wallsGraphics.fillRect(ox + 1330, 272, 40, 18);
+    this.wallsGraphics.strokeRect(ox + 1330, 272, 40, 18);
 
     // Cave Labyrinth Walls
     this.wallsGraphics.lineStyle(2, 0xCC00FF, 0.75);
-    this.wallsGraphics.fillRect(1120, 640, 28, 220);
-    this.wallsGraphics.strokeRect(1120, 640, 28, 220);
-    this.wallsGraphics.fillRect(1120, 640, 180, 28);
-    this.wallsGraphics.strokeRect(1120, 640, 180, 28);
-    this.wallsGraphics.fillRect(1380, 640, 140, 28);
-    this.wallsGraphics.strokeRect(1380, 640, 140, 28);
-    this.wallsGraphics.fillRect(1240, 740, 180, 28);
-    this.wallsGraphics.strokeRect(1240, 740, 180, 28);
-    this.wallsGraphics.fillRect(1400, 740, 28, 160);
-    this.wallsGraphics.strokeRect(1400, 740, 28, 160);
-    this.wallsGraphics.fillRect(1180, 840, 160, 28);
-    this.wallsGraphics.strokeRect(1180, 840, 160, 28);
+    this.wallsGraphics.fillRect(ox + 1120, 640, 28, 220);
+    this.wallsGraphics.strokeRect(ox + 1120, 640, 28, 220);
+    this.wallsGraphics.fillRect(ox + 1120, 640, 180, 28);
+    this.wallsGraphics.strokeRect(ox + 1120, 640, 180, 28);
+    this.wallsGraphics.fillRect(ox + 1380, 640, 140, 28);
+    this.wallsGraphics.strokeRect(ox + 1380, 640, 140, 28);
+    this.wallsGraphics.fillRect(ox + 1240, 740, 180, 28);
+    this.wallsGraphics.strokeRect(ox + 1240, 740, 180, 28);
+    this.wallsGraphics.fillRect(ox + 1400, 740, 28, 160);
+    this.wallsGraphics.strokeRect(ox + 1400, 740, 28, 160);
+    this.wallsGraphics.fillRect(ox + 1180, 840, 160, 28);
+    this.wallsGraphics.strokeRect(ox + 1180, 840, 160, 28);
 
     // Ruins Pillars
     this.wallsGraphics.lineStyle(2, 0xFF9900, 0.75);
-    this.wallsGraphics.fillRect(600, 120, 30, 160);
-    this.wallsGraphics.strokeRect(600, 120, 30, 160);
-    this.wallsGraphics.fillRect(700, 120, 180, 26);
-    this.wallsGraphics.strokeRect(700, 120, 180, 26);
-    this.wallsGraphics.fillRect(940, 120, 30, 160);
-    this.wallsGraphics.strokeRect(940, 120, 30, 160);
-    this.wallsGraphics.fillRect(680, 240, 30, 120);
-    this.wallsGraphics.strokeRect(680, 240, 30, 120);
-    this.wallsGraphics.fillRect(860, 240, 30, 120);
-    this.wallsGraphics.strokeRect(860, 240, 30, 120);
-    this.wallsGraphics.fillRect(740, 320, 90, 30);
-    this.wallsGraphics.strokeRect(740, 320, 90, 30);
+    this.wallsGraphics.fillRect(ox + 600, 120, 30, 160);
+    this.wallsGraphics.strokeRect(ox + 600, 120, 30, 160);
+    this.wallsGraphics.fillRect(ox + 700, 120, 180, 26);
+    this.wallsGraphics.strokeRect(ox + 700, 120, 180, 26);
+    this.wallsGraphics.fillRect(ox + 940, 120, 30, 160);
+    this.wallsGraphics.strokeRect(ox + 940, 120, 30, 160);
+    this.wallsGraphics.fillRect(ox + 680, 240, 30, 120);
+    this.wallsGraphics.strokeRect(ox + 680, 240, 30, 120);
+    this.wallsGraphics.fillRect(ox + 860, 240, 30, 120);
+    this.wallsGraphics.strokeRect(ox + 860, 240, 30, 120);
+    this.wallsGraphics.fillRect(ox + 740, 320, 90, 30);
+    this.wallsGraphics.strokeRect(ox + 740, 320, 90, 30);
 
     // Forest Tree Stands
     this.wallsGraphics.lineStyle(2, 0x00FF66, 0.7);
-    this.wallsGraphics.fillRect(140, 160, 90, 90);
-    this.wallsGraphics.strokeRect(140, 160, 90, 90);
-    this.wallsGraphics.fillRect(320, 220, 110, 70);
-    this.wallsGraphics.strokeRect(320, 220, 110, 70);
-    this.wallsGraphics.fillRect(120, 340, 80, 100);
-    this.wallsGraphics.strokeRect(120, 340, 80, 100);
-    this.wallsGraphics.fillRect(260, 380, 90, 60);
-    this.wallsGraphics.strokeRect(260, 380, 90, 60);
-    this.wallsGraphics.fillRect(100, 640, 110, 90);
-    this.wallsGraphics.strokeRect(100, 640, 110, 90);
-    this.wallsGraphics.fillRect(300, 660, 80, 110);
-    this.wallsGraphics.strokeRect(300, 660, 80, 110);
-    this.wallsGraphics.fillRect(180, 800, 130, 80);
-    this.wallsGraphics.strokeRect(180, 800, 130, 80);
-    this.wallsGraphics.fillRect(380, 780, 90, 90);
-    this.wallsGraphics.strokeRect(380, 780, 90, 90);
+    this.wallsGraphics.fillRect(ox + 140, 160, 90, 90);
+    this.wallsGraphics.strokeRect(ox + 140, 160, 90, 90);
+    this.wallsGraphics.fillRect(ox + 320, 220, 110, 70);
+    this.wallsGraphics.strokeRect(ox + 320, 220, 110, 70);
+    this.wallsGraphics.fillRect(ox + 120, 340, 80, 100);
+    this.wallsGraphics.strokeRect(ox + 120, 340, 80, 100);
+    this.wallsGraphics.fillRect(ox + 260, 380, 90, 60);
+    this.wallsGraphics.strokeRect(ox + 260, 380, 90, 60);
+    this.wallsGraphics.fillRect(ox + 100, 640, 110, 90);
+    this.wallsGraphics.strokeRect(ox + 100, 640, 110, 90);
+    this.wallsGraphics.fillRect(ox + 300, 660, 80, 110);
+    this.wallsGraphics.strokeRect(ox + 300, 660, 80, 110);
+    this.wallsGraphics.fillRect(ox + 180, 800, 130, 80);
+    this.wallsGraphics.strokeRect(ox + 180, 800, 130, 80);
+    this.wallsGraphics.fillRect(ox + 380, 780, 90, 90);
+    this.wallsGraphics.strokeRect(ox + 380, 780, 90, 90);
 
-    // 6. Top Left Controls Hint
-    const exitBtn = this.add.graphics();
-    exitBtn.fillStyle(0x141432, 0.85);
-    exitBtn.fillRoundedRect(30, 30, 200, 34, 8);
-    exitBtn.lineStyle(1.5, 0xFF0055, 0.8);
-    exitBtn.strokeRoundedRect(30, 30, 200, 34, 8);
-    this.labelsContainer.add(exitBtn);
-
-    const exitText = this.add.text(130, 47, 'ESC: LOBBY | R: RESET', {
-      fontFamily: 'sans-serif',
-      fontSize: '11px',
-      fontStyle: 'bold',
-      color: '#FF0055'
-    }).setOrigin(0.5);
-    this.labelsContainer.add(exitText);
-
-    const exitZone = this.add.zone(130, 47, 200, 34).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    exitZone.on('pointerdown', () => this.triggerStopMatch());
-    this.labelsContainer.add(exitZone);
-
-    // 7. Match Seed & Sound Badge (Bottom Right)
-    this.soundStatusText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 44, sounds.muted ? '[ SOUND: MUTED (Press S) ]' : '[ SOUND: ON (Press S) ]', {
+    // Bottom Left Status & Sound Badge
+    this.soundStatusText = this.add.text(25, WORLD_HEIGHT - 38, sounds.muted ? '[ SOUND: MUTED (Press S) ]' : '[ SOUND: ON (Press S) ]', {
       fontFamily: 'monospace',
-      fontSize: '12px',
+      fontSize: '11px',
       color: sounds.muted ? '#FF0055' : '#39FF14'
-    }).setOrigin(1, 0.5);
+    });
     this.labelsContainer.add(this.soundStatusText);
 
-    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `SEED: #${currentGameState.seed || '000000'} | [1-8] Anomalies | [M] POIs | [R] Reset | [S] Sound`, {
+    const seedText = this.add.text(25, WORLD_HEIGHT - 20, `MATCH SEED: #${currentGameState.seed || '000000'}`, {
       fontFamily: 'monospace',
-      fontSize: '12px',
+      fontSize: '11px',
       color: '#00F0FF'
-    }).setOrigin(1, 0.5);
+    });
     this.labelsContainer.add(seedText);
   }
 
-  // Render Big Center Pre-Match Countdown (5s)
-  renderCountdown(count) {
-    this.countdownContainer.removeAll(true);
-    if (currentGameState.state !== 'COUNTDOWN') return;
-
-    const bg = this.add.graphics();
-    bg.fillStyle(0x050512, 0.7);
-    bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    this.countdownContainer.add(bg);
-
-    const countText = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 20, count > 0 ? `${count}` : 'RACE!', {
-      fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: count > 0 ? '140px' : '100px',
-      color: count > 0 ? '#00F0FF' : '#39FF14',
-      stroke: '#FFFFFF',
-      strokeThickness: 4
-    }).setOrigin(0.5);
-
-    const sub = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 80, 'GET READY RACERS - PREPARE YOUR PHONES', {
-      fontFamily: 'sans-serif',
-      fontSize: '18px',
-      fontStyle: 'bold',
-      color: '#FFFFFF',
-      letterSpacing: 4
-    }).setOrigin(0.5);
-
-    this.countdownContainer.add([countText, sub]);
-
-    this.tweens.add({
-      targets: countText,
-      scaleX: 1.3,
-      scaleY: 1.3,
-      duration: 350,
-      yoyo: true,
-      ease: 'Quad.easeInOut'
-    });
-  }
-
-  // Render Top Center Running HUD (Digital Timer & Phase Badge)
+  // Render Center Top Running HUD (Digital Timer & Phase Badge)
   renderRunningHUD() {
     this.hudContainer.removeAll(true);
     if (currentGameState.state !== 'RUNNING') return;
@@ -1172,24 +1322,21 @@ class HostScene extends Phaser.Scene {
     const phase = currentGameState.phase || { name: 'PHASE 1: DISCOVERY', colorHex: '#00F0FF' };
     const isUrgent = currentGameState.timeRemaining <= 60;
 
-    // HUD Header Box
     const hudBox = this.add.graphics();
-    hudBox.fillStyle(0x0a0a1e, 0.9);
-    hudBox.fillRoundedRect(WORLD_WIDTH / 2 - 190, 24, 380, 52, 12);
-    hudBox.lineStyle(2, isUrgent ? 0xFF0055 : (currentGameState.phase ? Phaser.Display.Color.HexStringToColor(phase.colorHex).color : 0x00F0FF), 0.85);
-    hudBox.strokeRoundedRect(WORLD_WIDTH / 2 - 190, 24, 380, 52, 12);
+    hudBox.fillStyle(0x0a0a1e, 0.95);
+    hudBox.fillRoundedRect(-200, 0, 400, 52, 12);
+    hudBox.lineStyle(2, isUrgent ? 0xFF0055 : Phaser.Display.Color.HexStringToColor(phase.colorHex || '#00F0FF').color, 0.85);
+    hudBox.strokeRoundedRect(-200, 0, 400, 52, 12);
     this.hudContainer.add(hudBox);
 
-    // Large Clock Timer
-    const timerText = this.add.text(WORLD_WIDTH / 2 - 85, 50, `TIME ${timeFormatted}`, {
+    const timerText = this.add.text(-90, 26, `TIME ${timeFormatted}`, {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '28px',
       color: isUrgent ? '#FF0055' : '#FFFFFF',
       letterSpacing: 2
     }).setOrigin(0.5);
 
-    // Current Phase Badge
-    const phaseBadge = this.add.text(WORLD_WIDTH / 2 + 75, 50, phase.name, {
+    const phaseBadge = this.add.text(80, 26, phase.name, {
       fontFamily: 'sans-serif',
       fontSize: '12px',
       fontStyle: 'bold',
@@ -1202,7 +1349,7 @@ class HostScene extends Phaser.Scene {
 
   // Animated Glowing Banner on Phase Transition
   showPhaseChangeBanner(phase) {
-    const bannerContainer = this.add.container(WORLD_WIDTH / 2, -100);
+    const bannerContainer = this.add.container(1100, -100);
 
     const bannerBg = this.add.graphics();
     const colorNum = Phaser.Display.Color.HexStringToColor(phase.colorHex).color;
@@ -1229,7 +1376,6 @@ class HostScene extends Phaser.Scene {
     bannerContainer.add([bannerBg, title, sub]);
     bannerContainer.setDepth(150);
 
-    // Slide down from top, wait 3.5s, slide up
     this.tweens.add({
       targets: bannerContainer,
       y: 130,
@@ -1249,118 +1395,139 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Draw Live Interactables on Arena (Treasures, Chests, Portals, Keys, Glitch Items, Clues & Legendary Vault)
+  // Draw Live Interactables on Arena (Shifted by ARENA_OFFSET_X = 300)
   drawActiveInteractables(entities) {
     this.interactablesGraphics.clear();
     if (!entities) return;
 
+    const ox = ARENA_OFFSET_X;
+
     for (const ent of entities) {
       if (ent.state !== 'active' && ent.state !== 'revealed') continue;
 
+      const ex = ent.x + ox;
+      const ey = ent.y;
+
       if (ent.type === 'treasure') {
         this.interactablesGraphics.fillStyle(ent.colorNum || 0x00f0ff, 0.9);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 9);
+        this.interactablesGraphics.fillCircle(ex, ey, 9);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
-        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 9);
+        this.interactablesGraphics.strokeCircle(ex, ey, 9);
         this.interactablesGraphics.fillStyle(0xFFFFFF, 0.9);
-        this.interactablesGraphics.fillCircle(ent.x - 2, ent.y - 2, 2.5);
+        this.interactablesGraphics.fillCircle(ex - 2, ey - 2, 2.5);
       } else if (ent.type === 'glitch') {
         const now = Date.now();
         const remFraction = ent.expiresAt ? Math.max(0, (ent.expiresAt - now) / ((ent.durationSec || 10) * 1000)) : 1.0;
         
-        // Outer pulsing countdown arc
         this.interactablesGraphics.lineStyle(3, 0xFF00FF, 0.9);
         this.interactablesGraphics.beginPath();
-        this.interactablesGraphics.arc(ent.x, ent.y, 22, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * remFraction), false);
+        this.interactablesGraphics.arc(ex, ey, 22, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * remFraction), false);
         this.interactablesGraphics.strokePath();
 
-        // Glowing center diamond / orb
         this.interactablesGraphics.fillStyle(0xFF00FF, 0.95);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 12);
+        this.interactablesGraphics.fillCircle(ex, ey, 12);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 12);
+        this.interactablesGraphics.strokeCircle(ex, ey, 12);
         this.interactablesGraphics.fillStyle(0xFFFFFF, 0.9);
-        this.interactablesGraphics.fillCircle(ent.x - 3, ent.y - 3, 3);
+        this.interactablesGraphics.fillCircle(ex - 3, ey - 3, 3);
       } else if (ent.type === 'clue') {
-        // Active Legendary Clue Beacon (Pulsing Cyan Scroll)
         this.interactablesGraphics.fillStyle(0x00F0FF, 0.95);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 14);
+        this.interactablesGraphics.fillCircle(ex, ey, 14);
         this.interactablesGraphics.lineStyle(2.5, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 14);
+        this.interactablesGraphics.strokeCircle(ex, ey, 14);
         this.interactablesGraphics.fillStyle(0x050518, 1);
-        this.interactablesGraphics.fillRect(ent.x - 6, ent.y - 6, 12, 12);
+        this.interactablesGraphics.fillRect(ex - 6, ey - 6, 12, 12);
       } else if (ent.type === 'side_clue') {
-        // Minor Side Clue Glyph
         this.interactablesGraphics.fillStyle(0x00FFCC, 0.9);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 11);
+        this.interactablesGraphics.fillCircle(ex, ey, 11);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
-        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 11);
+        this.interactablesGraphics.strokeCircle(ex, ey, 11);
       } else if (ent.type === 'legendary_vault') {
-        // Glorious Golden Legendary Vault
         this.interactablesGraphics.fillStyle(0xFFE600, 1);
-        this.interactablesGraphics.fillRoundedRect(ent.x - 22, ent.y - 22, 44, 44, 8);
+        this.interactablesGraphics.fillRoundedRect(ex - 22, ey - 22, 44, 44, 8);
         this.interactablesGraphics.lineStyle(3, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeRoundedRect(ent.x - 22, ent.y - 22, 44, 44, 8);
-        
-        // Inner crown star
+        this.interactablesGraphics.strokeRoundedRect(ex - 22, ey - 22, 44, 44, 8);
         this.interactablesGraphics.fillStyle(0x050518, 1);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 10);
+        this.interactablesGraphics.fillCircle(ex, ey, 10);
         this.interactablesGraphics.fillStyle(0xFFE600, 1);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 5);
+        this.interactablesGraphics.fillCircle(ex, ey, 5);
       } else if (ent.type === 'chest') {
         this.interactablesGraphics.fillStyle(0xFFAA00, 0.95);
-        this.interactablesGraphics.fillRoundedRect(ent.x - 14, ent.y - 12, 28, 24, 4);
+        this.interactablesGraphics.fillRoundedRect(ex - 14, ey - 12, 28, 24, 4);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
-        this.interactablesGraphics.strokeRoundedRect(ent.x - 14, ent.y - 12, 28, 24, 4);
+        this.interactablesGraphics.strokeRoundedRect(ex - 14, ey - 12, 28, 24, 4);
       } else if (ent.type === 'vault') {
         this.interactablesGraphics.fillStyle(0xFF8800, 0.9);
-        this.interactablesGraphics.fillRoundedRect(ent.x - 18, ent.y - 18, 36, 36, 6);
+        this.interactablesGraphics.fillRoundedRect(ex - 18, ey - 18, 36, 36, 6);
         this.interactablesGraphics.lineStyle(2.5, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeRoundedRect(ent.x - 18, ent.y - 18, 36, 36, 6);
+        this.interactablesGraphics.strokeRoundedRect(ex - 18, ey - 18, 36, 36, 6);
         this.interactablesGraphics.fillStyle(0x050510, 1);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 6);
+        this.interactablesGraphics.fillCircle(ex, ey, 6);
       } else if (ent.type === 'key') {
         this.interactablesGraphics.fillStyle(0xFFDD00, 1);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 7);
-        this.interactablesGraphics.fillRect(ent.x, ent.y - 2, 10, 4);
+        this.interactablesGraphics.fillCircle(ex, ey, 7);
+        this.interactablesGraphics.fillRect(ex, ey - 2, 10, 4);
         this.interactablesGraphics.lineStyle(1.5, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 7);
+        this.interactablesGraphics.strokeCircle(ex, ey, 7);
       } else if (ent.type === 'portal') {
         this.interactablesGraphics.lineStyle(3, 0x00F0FF, 0.85);
-        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 16);
+        this.interactablesGraphics.strokeCircle(ex, ey, 16);
         this.interactablesGraphics.fillStyle(0x00F0FF, 0.25);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 16);
+        this.interactablesGraphics.fillCircle(ex, ey, 16);
       } else if (ent.type === 'merchant') {
         this.interactablesGraphics.fillStyle(0x39FF14, 0.9);
-        this.interactablesGraphics.fillRoundedRect(ent.x - 16, ent.y - 16, 32, 32, 6);
+        this.interactablesGraphics.fillRoundedRect(ex - 16, ey - 16, 32, 32, 6);
         this.interactablesGraphics.lineStyle(2, 0x050510, 1);
-        this.interactablesGraphics.strokeRoundedRect(ent.x - 16, ent.y - 16, 32, 32, 6);
+        this.interactablesGraphics.strokeRoundedRect(ex - 16, ey - 16, 32, 32, 6);
       } else if (ent.type === 'switch') {
         this.interactablesGraphics.fillStyle(0xFF0055, 0.9);
-        this.interactablesGraphics.fillCircle(ent.x, ent.y, 12);
+        this.interactablesGraphics.fillCircle(ex, ey, 12);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
-        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 12);
+        this.interactablesGraphics.strokeCircle(ex, ey, 12);
       }
     }
   }
 
-  // Draw Top 5 Leaderboard on Right Side (Dedicated Right Sidebar Outside Map)
+  // Draw Roaming Hazard Sentinels (Deduct points on touch)
+  drawHazardSentinels(sentinels) {
+    this.sentinelsGraphics.clear();
+    if (!sentinels || sentinels.length === 0 || currentGameState.state !== 'RUNNING') return;
+
+    const ox = ARENA_OFFSET_X;
+    const time = this.time.now;
+
+    for (const s of sentinels) {
+      const sx = s.x + ox;
+      const sy = s.y;
+      const pulse = 1 + Math.sin(time / 140) * 0.15;
+
+      // Outer Hazard Aura
+      this.sentinelsGraphics.lineStyle(2.5, 0xFF0055, 0.9);
+      this.sentinelsGraphics.strokeCircle(sx, sy, (s.radius || 22) * pulse);
+
+      // Spiky Diamond Core
+      this.sentinelsGraphics.fillStyle(0xFF0055, 0.95);
+      this.sentinelsGraphics.fillCircle(sx, sy, 14);
+      this.sentinelsGraphics.fillStyle(0xFFFFFF, 1);
+      this.sentinelsGraphics.fillCircle(sx, sy, 5);
+    }
+  }
+
+  // Right Column: Top 5 Leaderboard (Completely outside map)
   drawHostLeaderboard(leaderboard = []) {
     this.leaderboardContainer.removeAll(true);
     if (currentGameState.state !== 'RUNNING') return;
 
-    const startX = 1350;
-    const startY = 30;
-    const width = 210;
+    const width = 240;
 
     const bg = this.add.graphics();
-    bg.fillStyle(0x0a0a1e, 0.9);
-    bg.fillRoundedRect(startX, startY, width, 36 + leaderboard.length * 40, 10);
+    bg.fillStyle(0x0a0a1e, 0.92);
+    bg.fillRoundedRect(0, 0, width, 36 + leaderboard.length * 40, 10);
     bg.lineStyle(1.5, 0x00F0FF, 0.7);
-    bg.strokeRoundedRect(startX, startY, width, 36 + leaderboard.length * 40, 10);
+    bg.strokeRoundedRect(0, 0, width, 36 + leaderboard.length * 40, 10);
     this.leaderboardContainer.add(bg);
 
-    const title = this.add.text(startX + width / 2, startY + 18, 'TOP 5 LEADERBOARD', {
+    const title = this.add.text(width / 2, 18, 'TOP 5 LEADERBOARD', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '13px',
       color: '#00F0FF',
@@ -1371,23 +1538,23 @@ class HostScene extends Phaser.Scene {
     const rankColors = ['#FFE600', '#CCCCCC', '#CD7F32', '#FFFFFF', '#FFFFFF'];
 
     leaderboard.forEach((player, idx) => {
-      const itemY = startY + 44 + idx * 38;
+      const itemY = 44 + idx * 38;
       const rankColor = rankColors[idx] || '#FFFFFF';
 
       const pip = this.add.graphics();
       const pColorNum = player.color ? player.color.num : (player.colorNum || 0x00f0ff);
       pip.fillStyle(pColorNum, 1);
-      pip.fillCircle(startX + 14, itemY + 8, 6);
+      pip.fillCircle(14, itemY + 8, 6);
       this.leaderboardContainer.add(pip);
 
-      const nameText = this.add.text(startX + 28, itemY + 8, `${idx + 1}. ${player.name}`, {
+      const nameText = this.add.text(28, itemY + 8, `${idx + 1}. ${player.name}`, {
         fontFamily: 'sans-serif',
         fontSize: '12px',
         fontStyle: 'bold',
         color: rankColor
       }).setOrigin(0, 0.5);
 
-      const scoreText = this.add.text(startX + width - 10, itemY + 8, `${player.score}`, {
+      const scoreText = this.add.text(width - 10, itemY + 8, `${player.score}`, {
         fontFamily: 'monospace',
         fontSize: '13px',
         fontStyle: 'bold',
@@ -1396,7 +1563,6 @@ class HostScene extends Phaser.Scene {
 
       this.leaderboardContainer.add([nameText, scoreText]);
 
-      // Apply rank color & aura to player entity in world arena
       const entity = this.playerMap.get(player.id);
       if (entity) {
         entity.rank = idx + 1;
@@ -1412,11 +1578,16 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Floating Score Popup
+  // Floating Score Popup (+Points or -Points on Hazard Hit)
   spawnScorePopup(event) {
+    const ox = ARENA_OFFSET_X;
+    const px = event.x + ox;
+    const py = event.y;
+    const isNegative = event.amount < 0;
+
     const burst = this.add.graphics();
-    burst.lineStyle(3, event.colorNum || 0x39ff14, 0.9);
-    burst.strokeCircle(event.x, event.y, 10);
+    burst.lineStyle(3, isNegative ? 0xFF0055 : (event.colorNum || 0x39ff14), 0.9);
+    burst.strokeCircle(px, py, 10);
     this.fxContainer.add(burst);
 
     this.tweens.add({
@@ -1429,22 +1600,60 @@ class HostScene extends Phaser.Scene {
       onComplete: () => burst.destroy()
     });
 
-    const popupText = this.add.text(event.x, event.y - 10, `+${event.amount}`, {
+    const popupText = this.add.text(px, py - 10, isNegative ? `${event.amount}` : `+${event.amount}`, {
       fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: '22px',
-      color: '#39FF14',
+      fontSize: '24px',
+      color: isNegative ? '#FF0055' : '#39FF14',
       stroke: '#000000',
-      strokeThickness: 3
+      strokeThickness: 4
     }).setOrigin(0.5);
     this.fxContainer.add(popupText);
 
     this.tweens.add({
       targets: popupText,
-      y: event.y - 55,
+      y: py - 50,
       alpha: 0,
-      duration: 1100,
+      duration: 1000,
       ease: 'Cubic.easeOut',
       onComplete: () => popupText.destroy()
+    });
+  }
+
+  // Render Big Center Pre-Match Countdown (5s)
+  renderCountdown(count) {
+    this.countdownContainer.removeAll(true);
+    if (currentGameState.state !== 'COUNTDOWN') return;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x050512, 0.75);
+    bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.countdownContainer.add(bg);
+
+    const countText = this.add.text(1100, WORLD_HEIGHT / 2 - 20, count > 0 ? `${count}` : 'RACE!', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: count > 0 ? '140px' : '100px',
+      color: count > 0 ? '#00F0FF' : '#39FF14',
+      stroke: '#FFFFFF',
+      strokeThickness: 4
+    }).setOrigin(0.5);
+
+    const sub = this.add.text(1100, WORLD_HEIGHT / 2 + 80, 'GET READY RACERS - PREPARE YOUR PHONES', {
+      fontFamily: 'sans-serif',
+      fontSize: '18px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      letterSpacing: 4
+    }).setOrigin(0.5);
+
+    this.countdownContainer.add([countText, sub]);
+
+    this.tweens.add({
+      targets: countText,
+      scaleX: 1.3,
+      scaleY: 1.3,
+      duration: 350,
+      yoyo: true,
+      ease: 'Quad.easeInOut'
     });
   }
 
@@ -1454,11 +1663,11 @@ class HostScene extends Phaser.Scene {
     if (currentGameState.state !== 'ENDED') return;
 
     const bg = this.add.graphics();
-    bg.fillStyle(0x050512, 0.92);
+    bg.fillStyle(0x050512, 0.94);
     bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.endedContainer.add(bg);
 
-    const title = this.add.text(WORLD_WIDTH / 2, 80, '🏆 MATCH COMPLETED 🏆', {
+    const title = this.add.text(1100, 80, '🏆 MATCH COMPLETED 🏆', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '56px',
       color: '#FFE600',
@@ -1468,8 +1677,7 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.endedContainer.add(title);
 
-    // 1. Draw Podium Pillars for Top 3
-    const podiumX = [WORLD_WIDTH / 2, WORLD_WIDTH / 2 - 220, WORLD_WIDTH / 2 + 220]; // 1st (center), 2nd (left), 3rd (right)
+    const podiumX = [1100, 880, 1320];
     const podiumH = [200, 150, 120];
     const podiumColors = [0xFFD700, 0xC0C0C0, 0xCD7F32];
     const ranks = ['1ST PLACE 👑', '2ND PLACE 🥈', '3RD PLACE 🥉'];
@@ -1481,7 +1689,6 @@ class HostScene extends Phaser.Scene {
       const h = idx === 0 ? podiumH[0] : (idx === 1 ? podiumH[1] : podiumH[2]);
       const baseY = 540;
 
-      // Pillar Box
       const pillar = this.add.graphics();
       pillar.fillStyle(0x14142e, 0.9);
       pillar.fillRoundedRect(x - 90, baseY - h, 180, h, 8);
@@ -1489,14 +1696,12 @@ class HostScene extends Phaser.Scene {
       pillar.strokeRoundedRect(x - 90, baseY - h, 180, h, 8);
       this.endedContainer.add(pillar);
 
-      // Player Color Pip
       const pip = this.add.graphics();
       const col = p.color ? p.color.num : (p.colorNum || 0x00f0ff);
       pip.fillStyle(col, 1);
       pip.fillCircle(x, baseY - h - 35, 18);
       this.endedContainer.add(pip);
 
-      // Rank Label
       const rankLabel = this.add.text(x, baseY - h + 24, ranks[idx], {
         fontFamily: 'sans-serif',
         fontSize: '14px',
@@ -1504,7 +1709,6 @@ class HostScene extends Phaser.Scene {
         color: '#FFFFFF'
       }).setOrigin(0.5);
 
-      // Player Name
       const nameText = this.add.text(x, baseY - h + 55, p.name, {
         fontFamily: '"Impact", "Arial Black", sans-serif',
         fontSize: '22px',
@@ -1512,7 +1716,6 @@ class HostScene extends Phaser.Scene {
         letterSpacing: 1
       }).setOrigin(0.5);
 
-      // Score
       const scoreText = this.add.text(x, baseY - h + 90, `${p.score} PTS`, {
         fontFamily: 'monospace',
         fontSize: '20px',
@@ -1523,19 +1726,18 @@ class HostScene extends Phaser.Scene {
       this.endedContainer.add([rankLabel, nameText, scoreText]);
     });
 
-    // 2. Reset Button & Shortcut Hint
     const btnY = WORLD_HEIGHT - 120;
     const btnW = 320;
     const btnH = 58;
 
     const resetBtn = this.add.graphics();
     resetBtn.fillStyle(0x00F0FF, 1);
-    resetBtn.fillRoundedRect(WORLD_WIDTH / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
+    resetBtn.fillRoundedRect(1100 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
     resetBtn.lineStyle(2, 0xFFFFFF, 1);
-    resetBtn.strokeRoundedRect(WORLD_WIDTH / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
+    resetBtn.strokeRoundedRect(1100 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
     this.endedContainer.add(resetBtn);
 
-    const resetText = this.add.text(WORLD_WIDTH / 2, btnY, 'RETURN TO LOBBY', {
+    const resetText = this.add.text(1100, btnY, 'RETURN TO LOBBY', {
       fontFamily: 'sans-serif',
       fontSize: '20px',
       fontStyle: 'bold',
@@ -1543,7 +1745,7 @@ class HostScene extends Phaser.Scene {
       letterSpacing: 2
     }).setOrigin(0.5);
 
-    const keyHint = this.add.text(WORLD_WIDTH / 2, btnY + 44, '[ Press R on keyboard to reset ]', {
+    const keyHint = this.add.text(1100, btnY + 44, '[ Press R on keyboard to reset ]', {
       fontFamily: 'sans-serif',
       fontSize: '13px',
       color: '#00F0FF'
@@ -1551,7 +1753,7 @@ class HostScene extends Phaser.Scene {
 
     this.endedContainer.add([resetText, keyHint]);
 
-    const zone = this.add.zone(WORLD_WIDTH / 2, btnY, btnW, btnH).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    const zone = this.add.zone(1100, btnY, btnW, btnH).setOrigin(0.5).setInteractive({ useHandCursor: true });
     zone.on('pointerdown', () => this.triggerResetMatch());
     this.endedContainer.add(zone);
 
@@ -1563,24 +1765,16 @@ class HostScene extends Phaser.Scene {
     const mapData = currentGameState.map;
     if (!mapData || !mapData.pois) return;
 
+    const ox = ARENA_OFFSET_X;
     const pois = mapData.pois;
     const g = this.add.graphics();
 
     for (const t of (pois.treasures || [])) {
       g.fillStyle(0xFFD700, 0.9);
-      g.fillCircle(t.x, t.y, 8);
+      g.fillCircle(t.x + ox, t.y, 8);
       g.lineStyle(1.5, 0xFFFFFF, 1);
-      g.strokeCircle(t.x, t.y, 8);
-      const label = this.add.text(t.x, t.y, 'T', { fontFamily: 'sans-serif', fontSize: '9px', fontStyle: 'bold', color: '#000000' }).setOrigin(0.5);
-      this.poiDebugContainer.add(label);
-    }
-
-    for (const v of (pois.vaults || [])) {
-      g.fillStyle(0xFF8800, 0.95);
-      g.fillRect(v.x - 14, v.y - 14, 28, 28);
-      g.lineStyle(2, 0xFFFFFF, 1);
-      g.strokeRect(v.x - 14, v.y - 14, 28, 28);
-      const label = this.add.text(v.x, v.y, 'VAULT', { fontFamily: 'monospace', fontSize: '7px', fontStyle: 'bold', color: '#FFFFFF' }).setOrigin(0.5);
+      g.strokeCircle(t.x + ox, t.y, 8);
+      const label = this.add.text(t.x + ox, t.y, 'T', { fontFamily: 'sans-serif', fontSize: '9px', fontStyle: 'bold', color: '#000000' }).setOrigin(0.5);
       this.poiDebugContainer.add(label);
     }
 
@@ -1611,7 +1805,7 @@ class HostScene extends Phaser.Scene {
 
     this.lobbyContainer.add([title, subtitle]);
 
-    const leftX = w * 0.28;
+    const leftX = w * 0.32;
     const leftY = 515;
     const boxW = 460;
     const boxH = 520;
@@ -1652,13 +1846,6 @@ class HostScene extends Phaser.Scene {
         align: 'center'
       }).setOrigin(0.5);
       this.lobbyContainer.add(loadingQr);
-
-      // Retry render in 300ms if not ready yet
-      this.time.delayedCall(300, () => {
-        if (currentGameState.state === 'LOBBY' && this.textures.exists('qrcode')) {
-          this.renderLobbyUI();
-        }
-      });
     }
 
     const orText = this.add.text(leftX, leftY + 165, 'OR VISIT IN BROWSER', {
@@ -1683,7 +1870,7 @@ class HostScene extends Phaser.Scene {
 
     this.lobbyContainer.add([orText, urlBg, urlText]);
 
-    const rightX = w * 0.72;
+    const rightX = w * 0.68;
     const rightY = 515;
 
     const rightBg = this.add.graphics();
@@ -1801,7 +1988,8 @@ class HostScene extends Phaser.Scene {
   }
 
   createPlayerEntity(p) {
-    const container = this.add.container(p.x || 800, p.y || 530);
+    const ox = ARENA_OFFSET_X;
+    const container = this.add.container((p.x || 800) + ox, p.y || 530);
     const radius = 24;
     const pColorNum = p.color ? p.color.num : (p.colorNum || 0x00f0ff);
 
@@ -1894,6 +2082,11 @@ class HostScene extends Phaser.Scene {
     const entities = snapshot.e || snapshot.ent || [];
     this.drawActiveInteractables(entities);
 
+    // Hazard Sentinels
+    if (snapshot.sentinels) {
+      this.drawHazardSentinels(snapshot.sentinels);
+    }
+
     if (snapshot.lb) {
       this.drawHostLeaderboard(snapshot.lb);
     }
@@ -1954,20 +2147,24 @@ class HostScene extends Phaser.Scene {
     if (!fogActive || currentGameState.state !== 'RUNNING') return;
 
     this.fogGraphics.fillStyle(0x050512, 0.85);
-    this.fogGraphics.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.fogGraphics.fillRect(ARENA_OFFSET_X, 0, 1600, WORLD_HEIGHT);
   }
 
   renderGoldenCrown(crownState) {
     this.crownContainer.removeAll(true);
     if (!crownState || !crownState.active || currentGameState.state !== 'RUNNING') return;
 
-    const crown = this.add.text(crownState.x, crownState.y - 28, '👑', {
+    const ox = ARENA_OFFSET_X;
+    const cx = crownState.x + ox;
+    const cy = crownState.y - 28;
+
+    const crown = this.add.text(cx, cy, '👑', {
       fontSize: '22px'
     }).setOrigin(0.5);
 
     const aura = this.add.graphics();
     aura.lineStyle(2, 0xFFE600, 0.9);
-    aura.strokeCircle(crownState.x, crownState.y - 28, 16);
+    aura.strokeCircle(cx, cy, 16);
 
     this.crownContainer.add([aura, crown]);
   }
@@ -1994,6 +2191,7 @@ class HostScene extends Phaser.Scene {
     const isRunning = currentGameState.state === 'RUNNING';
     const lerpFactor = Math.min(1, (delta / 1000) * 25);
     const isSpeedSurge = latestSnapshot && latestSnapshot.anomalies && latestSnapshot.anomalies.activeAnomalies && latestSnapshot.anomalies.activeAnomalies.some(a => a.id === 'SPEED_SURGE');
+    const ox = ARENA_OFFSET_X;
 
     for (const entity of this.playerMap.values()) {
       if (isRunning) {
@@ -2001,7 +2199,6 @@ class HostScene extends Phaser.Scene {
         const dy = entity.targetY - entity.currentY;
         const dist = Math.hypot(dx, dy);
 
-        // Snap instantly if teleported or distance too large
         if (dist > 250) {
           entity.currentX = entity.targetX;
           entity.currentY = entity.targetY;
@@ -2010,7 +2207,7 @@ class HostScene extends Phaser.Scene {
           entity.currentY += dy * lerpFactor;
         }
 
-        entity.container.setPosition(entity.currentX, entity.currentY);
+        entity.container.setPosition(entity.currentX + ox, entity.currentY);
 
         // Particle trail during SPEED_SURGE
         if (isSpeedSurge && (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4)) {
@@ -2018,7 +2215,7 @@ class HostScene extends Phaser.Scene {
             const trail = this.add.graphics();
             const pCol = entity.color ? entity.color.num : 0x00f0ff;
             trail.fillStyle(pCol, 0.65);
-            trail.fillCircle(entity.currentX + (Math.random() - 0.5) * 8, entity.currentY + (Math.random() - 0.5) * 8, 4.5);
+            trail.fillCircle(entity.currentX + ox + (Math.random() - 0.5) * 8, entity.currentY + (Math.random() - 0.5) * 8, 4.5);
             this.fxContainer.add(trail);
             this.tweens.add({
               targets: trail,
