@@ -1,6 +1,50 @@
 // public/host/host.js - Big Screen Phaser 3 Host Arena, Public Clue Chains, Legendary Treasure & Live Event Feed
 const socket = io({
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  reconnectionAttempts: 10,
+  timeout: 8000
+});
+
+// 8-second connection timeout guard
+let socketConnected = false;
+const socketTimeoutTimer = setTimeout(() => {
+  if (!socket.connected) {
+    if (typeof window.showHostError === 'function') {
+      window.showHostError(
+        'Socket.IO Connection Timeout (8s)',
+        `Could not establish connection to ${window.location.origin} within 8 seconds.\n\nSocket ID: ${socket.id || 'none'}\nState: ${socket.connected ? 'connected' : 'disconnected'}`,
+        [
+          'Verify that the ANOMALY node server is running and accessible.',
+          'If deployed on Render free tier, the instance might be waking from cold sleep. Please wait 10 seconds and reload.',
+          'Test the server health endpoint at ' + window.location.origin + '/ping.',
+          'Check browser developer console (F12) for WebSocket connection errors.'
+        ]
+      );
+    }
+  }
+}, 8000);
+
+socket.on('connect', () => {
+  socketConnected = true;
+  clearTimeout(socketTimeoutTimer);
+  if (typeof window.updateConnectionStatus === 'function') {
+    window.updateConnectionStatus(true);
+  }
+  console.log('[Host] Connected to server with Socket ID:', socket.id);
+});
+
+socket.on('disconnect', (reason) => {
+  if (typeof window.updateConnectionStatus === 'function') {
+    window.updateConnectionStatus(false);
+  }
+  console.warn('[Host] Disconnected from server:', reason);
+});
+
+socket.on('connect_error', (err) => {
+  if (typeof window.updateConnectionStatus === 'function') {
+    window.updateConnectionStatus(false);
+  }
+  console.warn('[Host] Connection error:', err);
 });
 
 const WORLD_WIDTH = 1600;

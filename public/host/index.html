@@ -17,6 +17,7 @@
       overflow: hidden;
       background-color: #05050c;
       font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      color: #ffffff;
     }
     #game-container {
       width: 100vw;
@@ -28,19 +29,230 @@
     canvas {
       display: block;
     }
+
+    /* Fixed corner status badge */
+    #host-status-bar {
+      position: fixed;
+      bottom: 8px;
+      left: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(10, 10, 26, 0.85);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-family: monospace;
+      color: #8888aa;
+      z-index: 9000;
+      pointer-events: none;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #ff0055;
+      box-shadow: 0 0 6px #ff0055;
+      transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .status-dot.connected {
+      background-color: #39ff14;
+      box-shadow: 0 0 6px #39ff14;
+    }
+    .build-label {
+      color: #00f0ff;
+      opacity: 0.85;
+      margin-left: 6px;
+      border-left: 1px solid rgba(255, 255, 255, 0.2);
+      padding-left: 8px;
+    }
+
+    /* Fullscreen Error Display Overlay */
+    #error-display {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 5, 18, 0.97);
+      z-index: 10000;
+      padding: 40px;
+      overflow-y: auto;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    }
+    .error-card {
+      max-width: 800px;
+      margin: 40px auto;
+      background: #0d0d22;
+      border: 2px solid #ff0055;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 0 30px rgba(255, 0, 85, 0.3);
+    }
+    .error-title {
+      font-size: 24px;
+      color: #ff0055;
+      font-weight: bold;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .error-message {
+      font-size: 16px;
+      color: #ffffff;
+      margin-bottom: 20px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #14142e;
+      padding: 14px;
+      border-radius: 6px;
+      border-left: 4px solid #ff0055;
+      font-family: monospace;
+    }
+    .error-steps-title {
+      font-size: 14px;
+      color: #00f0ff;
+      font-weight: bold;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+    .error-steps {
+      list-style-type: decimal;
+      padding-left: 20px;
+      color: #cccccc;
+      line-height: 1.6;
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    .error-actions {
+      display: flex;
+      gap: 12px;
+    }
+    .error-btn {
+      background: #00f0ff;
+      color: #050512;
+      font-weight: bold;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .error-btn:hover {
+      background: #39ff14;
+    }
   </style>
-  <!-- Phaser 3 library with CDN & local fallback -->
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.88.2/dist/phaser.min.js"></script>
+
+  <!-- Error and diagnostic handler setup before any scripts -->
+  <script>
+    window.showHostError = function(title, message, steps) {
+      const el = document.getElementById('error-display');
+      const titleEl = document.getElementById('error-title-text');
+      const msgEl = document.getElementById('error-message-text');
+      const stepsEl = document.getElementById('error-steps-list');
+      if (el && titleEl && msgEl) {
+        titleEl.textContent = title || 'Host Screen Error';
+        msgEl.textContent = message || 'An unexpected error occurred.';
+        if (stepsEl && Array.isArray(steps) && steps.length > 0) {
+          stepsEl.innerHTML = steps.map(function(s) { return '<li>' + s + '</li>'; }).join('');
+        }
+        el.style.display = 'block';
+      }
+      console.error('[Host Error Boundary]', title, message);
+    };
+
+    window.updateConnectionStatus = function(connected) {
+      const dot = document.getElementById('connection-dot');
+      const text = document.getElementById('connection-text');
+      if (dot && text) {
+        if (connected) {
+          dot.classList.add('connected');
+          text.textContent = 'Connected';
+          text.style.color = '#39ff14';
+        } else {
+          dot.classList.remove('connected');
+          text.textContent = 'Disconnected';
+          text.style.color = '#ff0055';
+        }
+      }
+    };
+
+    // Catch early script errors
+    window.addEventListener('error', function(event) {
+      window.showHostError(
+        'Script Error: ' + (event.message || 'Unknown error'),
+        'File: ' + (event.filename || 'unknown') + ' (Line ' + (event.lineno || 0) + ')\n\n' + (event.error ? (event.error.stack || event.error) : ''),
+        [
+          'Hard-refresh the page (Ctrl + Shift + R or Cmd + Shift + R) to clear old cache.',
+          'Verify that /vendor/phaser.min.js and /socket.io/socket.io.js are reachable.',
+          'Check browser developer console (F12) for detailed logs.'
+        ]
+      );
+    });
+
+    window.addEventListener('unhandledrejection', function(event) {
+      window.showHostError(
+        'Unhandled Promise Rejection',
+        String(event.reason && (event.reason.stack || event.reason.message || event.reason)),
+        [
+          'Refresh the page and verify server connectivity at /ping.',
+          'Check server logs for possible 500 or network errors.'
+        ]
+      );
+    });
+  </script>
+
+  <!-- Phaser 3 library ONLY from local /vendor/phaser.min.js with cache-busting -->
+  <script src="/vendor/phaser.min.js?v=2026-09-24-2"></script>
   <script>
     if (typeof Phaser === 'undefined') {
-      document.write('<script src="/vendor/phaser/phaser.min.js"><\/script>');
+      window.showHostError(
+        'Phaser 3 Library Failed to Load',
+        'Could not load Phaser from /vendor/phaser.min.js.\n\nwindow.Phaser is undefined.',
+        [
+          'Ensure public/vendor/phaser.min.js exists in the repository.',
+          'Check if the static route /vendor is properly served by the server.',
+          'Check the Network tab in DevTools (F12) to see if /vendor/phaser.min.js returned 404 or failed.'
+        ]
+      );
     }
   </script>
-  <!-- Socket.IO client -->
-  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Socket.IO client with cache-busting -->
+  <script src="/socket.io/socket.io.js?v=2026-09-24-2"></script>
 </head>
 <body>
   <div id="game-container"></div>
-  <script type="module" src="/host/host.js"></script>
+
+  <!-- Bottom corner status & build label -->
+  <div id="host-status-bar">
+    <div id="connection-dot" class="status-dot"></div>
+    <span id="connection-text">Disconnected</span>
+    <span class="build-label">build 2026-09-24-2</span>
+  </div>
+
+  <!-- Fullscreen error overlay -->
+  <div id="error-display">
+    <div class="error-card">
+      <div class="error-title">
+        <span>⚠️</span>
+        <span id="error-title-text">ANOMALY Host Error</span>
+      </div>
+      <div id="error-message-text" class="error-message"></div>
+      <div class="error-steps-title">What to try:</div>
+      <ul id="error-steps-list" class="error-steps">
+        <li>Refresh the browser window (Ctrl+R / F5).</li>
+        <li>Verify the server is running by opening <a href="/ping" style="color:#00F0FF;" target="_blank">/ping</a>.</li>
+        <li>Open browser developer tools (F12) and inspect the Console and Network tabs.</li>
+      </ul>
+      <div class="error-actions">
+        <button class="error-btn" onclick="window.location.reload(true)">RELOAD PAGE</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/host/host.js?v=2026-09-24-2"></script>
 </body>
 </html>

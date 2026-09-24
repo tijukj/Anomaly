@@ -24,10 +24,8 @@ const io = new Server(server, {
   }
 });
 
-// Serve Phaser from node_modules
-app.use('/vendor/phaser', express.static(path.join(ROOT_DIR, 'node_modules/phaser/dist')));
-
-// Serve Static client directories
+// Serve static vendor and client directories
+app.use('/vendor', express.static(path.join(ROOT_DIR, 'public/vendor')));
 app.use('/host', express.static(path.join(ROOT_DIR, 'public/host')));
 app.use('/play', express.static(path.join(ROOT_DIR, 'public/play')));
 app.use('/shared', express.static(path.join(ROOT_DIR, 'public/shared')));
