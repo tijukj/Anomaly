@@ -336,6 +336,45 @@ socket.on('mission_completed', (data) => {
   }
 });
 
+// Socket Event: Public Clue Found Notification
+socket.on('public_clue_found', (data) => {
+  triggerHaptic([60, 40, 60]);
+
+  if (hudMission) {
+    hudMission.textContent = `📜 CLUE #${data.step}: "${data.text}"`;
+    hudMission.style.color = '#FFE600';
+    setTimeout(() => {
+      if (hudMission) hudMission.style.color = '#00F0FF';
+    }, 5000);
+  }
+});
+
+// Socket Event: Final Revelation Notification
+socket.on('final_revelation', (data) => {
+  triggerHaptic([100, 50, 100]);
+
+  if (hudMission) {
+    hudMission.textContent = `👑 FINAL REVELATION: VAULT EXPOSED IN CASTLE!`;
+    hudMission.style.color = '#FFE600';
+    setTimeout(() => {
+      if (hudMission) hudMission.style.color = '#00F0FF';
+    }, 6000);
+  }
+});
+
+// Socket Event: Legendary Treasure Claimed
+socket.on('legendary_found', (data) => {
+  triggerHaptic([150, 80, 150]);
+
+  if (hudMission) {
+    hudMission.textContent = `👑 ${data.playerName.toUpperCase()} CLAIMED LEGENDARY (+150 PTS)!`;
+    hudMission.style.color = '#FFE600';
+    setTimeout(() => {
+      if (hudMission) hudMission.style.color = '#00F0FF';
+    }, 6000);
+  }
+});
+
 // Socket Event: Personal Player HUD (Rank, Timer, Score, Mission & Smart Button)
 socket.on('player_hud', (data) => {
   if (!data) return;
@@ -355,7 +394,7 @@ socket.on('player_hud', (data) => {
     if (hudKeyBadge) hudKeyBadge.classList.add('hidden');
   }
 
-  if (data.mission && hudMission) {
+  if (data.mission && hudMission && !hudMission.textContent.startsWith('📜') && !hudMission.textContent.startsWith('👑')) {
     hudMission.textContent = data.mission;
   }
 

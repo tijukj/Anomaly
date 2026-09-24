@@ -38,7 +38,7 @@ export const CONFIG = {
     {
       id: 'hunt',
       name: 'PHASE 3: THE HUNT',
-      subtitle: 'VAULTS ACTIVE - UNLOCK CITADEL & CAVES',
+      subtitle: 'LEGENDARY CLUES ACTIVE - UNLOCK CITADEL & CAVES',
       fractionStart: 0.6,
       fractionEnd: 0.8,
       colorHex: '#FFAA00',
@@ -47,7 +47,7 @@ export const CONFIG = {
     {
       id: 'chaos',
       name: 'PHASE 4: CHAOS FINALE',
-      subtitle: 'EPIC TREASURES & HIGH STAKES - RACE TO 1ST',
+      subtitle: 'LEGENDARY REVELATION & HIGH STAKES - RACE TO 1ST',
       fractionStart: 0.8,
       fractionEnd: 1.0,
       colorHex: '#FF0055',
@@ -92,6 +92,9 @@ export const CONFIG = {
     CHEST_MIN: 10,
     CHEST_MAX: 35,
     VAULT: 50,
+    CLUE_DISCOVERY: 15,
+    SIDE_CLUE_BONUS: 25,
+    LEGENDARY_TREASURE: 150,
     DISCOVERY_BONUS: 10,
     MERCHANT_MIN: 5,
     MERCHANT_MAX: 25,
@@ -109,6 +112,19 @@ export const CONFIG = {
     COLOR_HEX: '#FF00FF',
     COLOR_NUM: 0xff00ff,
     POINTS: 40
+  },
+
+  // Phase 7: Public Clue Chains & The Legendary Treasure Configuration
+  LEGENDARY: {
+    POINTS: 150,
+    START_REVEAL_FRACTION: 0.60, // Legendary chain awakens at 6:00 (Phase 3: The Hunt)
+    FINAL_REVELATION_FRACTION: 0.80, // Final Vault fully revealed at 8:00 (Phase 4: Chaos Finale)
+    BANNER_DISPLAY_MS: 6000, // Show public clue large on host screen for 6 seconds
+    SIDE_CLUE_COUNT: 3, // Bonus minor side clues available from match start
+    VAULT_COLOR_HEX: '#FFE600',
+    VAULT_COLOR_NUM: 0xffe600,
+    CLUE_COLOR_HEX: '#00F0FF',
+    CLUE_COLOR_NUM: 0x00f0ff
   },
 
   // Phase 6: Dynamic Mission System Configuration
@@ -147,7 +163,9 @@ export const CONFIG = {
     SWITCH: 48,
     PORTAL: 48,
     MERCHANT: 54,
-    GLITCH: 46
+    GLITCH: 46,
+    CLUE: 44,
+    LEGENDARY_VAULT: 56
   },
 
   // Seeded POI Counts Per Match

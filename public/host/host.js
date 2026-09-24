@@ -1,4 +1,4 @@
-// public/host/host.js - Big Screen Phaser 3 Host Arena, Countdown, Timeline, Glitch Treasures & Event Feed
+// public/host/host.js - Big Screen Phaser 3 Host Arena, Public Clue Chains, Legendary Treasure & Live Event Feed
 const socket = io({
   transports: ['websocket', 'polling']
 });
@@ -23,6 +23,7 @@ let currentGameState = {
   timeRemaining: 600,
   phaseIndex: 0,
   phase: { name: 'PHASE 1: DISCOVERY', colorHex: '#00F0FF' },
+  clueState: null,
   map: null
 };
 
@@ -67,7 +68,9 @@ class HostScene extends Phaser.Scene {
     this.countdownContainer = null;
     this.endedContainer = null;
     this.leaderboardContainer = null;
+    this.cluesPanelContainer = null;
     this.eventFeedContainer = null;
+    this.celebrationContainer = null;
     this.debugContainer = null;
     this.poiDebugContainer = null;
     this.hostEvents = [];
@@ -93,7 +96,9 @@ class HostScene extends Phaser.Scene {
     this.countdownContainer = this.add.container(0, 0);
     this.endedContainer = this.add.container(0, 0);
     this.leaderboardContainer = this.add.container(0, 0);
+    this.cluesPanelContainer = this.add.container(WORLD_WIDTH - 220, 275);
     this.eventFeedContainer = this.add.container(30, WORLD_HEIGHT - 170);
+    this.celebrationContainer = this.add.container(0, 0);
     this.poiDebugContainer = this.add.container(0, 0);
     this.lobbyContainer = this.add.container(0, 0);
     this.arenaContainer = this.add.container(0, 0);
@@ -150,6 +155,9 @@ class HostScene extends Phaser.Scene {
         this.drawFullMap();
         this.renderPoiMarkers();
         this.renderRunningHUD();
+        if (state.clueState) {
+          this.drawKnownCluesPanel(state.clueState.knownClues, state.clueState.chainTitle, state.clueState);
+        }
       } else if (state.state === 'ENDED') {
         this.renderEndedScreen();
       }
@@ -176,6 +184,24 @@ class HostScene extends Phaser.Scene {
     // Socket Event: Host Event Feed (Missions, Glitch treasures, Keys, Vaults)
     socket.on('host_event', (event) => {
       this.addHostEvent(event);
+    });
+
+    // Socket Event: Public Clue Discovered (Large 6-second host banner)
+    socket.on('public_clue_found', (data) => {
+      this.showPublicClueBanner(data);
+      if (data.knownClues) {
+        this.drawKnownCluesPanel(data.knownClues, data.chainTitle);
+      }
+    });
+
+    // Socket Event: Final Revelation (8:00 Chaos finale trigger)
+    socket.on('final_revelation', (data) => {
+      this.showFinalRevelationBanner(data);
+    });
+
+    // Socket Event: Legendary Treasure Claimed (+150 pts celebration)
+    socket.on('legendary_found', (data) => {
+      this.showLegendaryFoundCelebration(data);
     });
 
     // Socket Event: Match Ended
@@ -215,6 +241,8 @@ class HostScene extends Phaser.Scene {
     this.debugContainer.setVisible(showDebugOverlay);
     this.poiDebugContainer.setVisible(showPoiDebugMarkers);
     this.eventFeedContainer.setDepth(60);
+    this.cluesPanelContainer.setDepth(55);
+    this.celebrationContainer.setDepth(300);
   }
 
   addHostEvent(event) {
@@ -262,6 +290,221 @@ class HostScene extends Phaser.Scene {
     });
   }
 
+  // Draw Public "Known Clues" Panel on Host Screen
+  drawKnownCluesPanel(knownClues = [], chainTitle = '', clueState = null) {
+    this.cluesPanelContainer.removeAll(true);
+    if (currentGameState.state !== 'RUNNING') return;
+
+    const startW = 190;
+    const cluesList = knownClues || [];
+    const boxH = 50 + Math.max(1, cluesList.length) * 44;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0a0a1e, 0.85);
+    bg.fillRoundedRect(0, 0, startW + 20, boxH, 8);
+    bg.lineStyle(1.5, 0xFFE600, 0.6);
+    bg.strokeRoundedRect(0, 0, startW + 20, boxH, 8);
+    this.cluesPanelContainer.add(bg);
+
+    const header = this.add.text(10, 12, `📜 KNOWN CLUES (${cluesList.length}/3)`, {
+      fontFamily: 'sans-serif',
+      fontSize: '11px',
+      fontStyle: 'bold',
+      color: '#FFE600',
+      letterSpacing: 1
+    });
+    this.cluesPanelContainer.add(header);
+
+    if (cluesList.length === 0) {
+      const hint = this.add.text(10, 36, 'Awakens at 6:00 (Hunt)...', {
+        fontFamily: 'sans-serif',
+        fontSize: '10px',
+        fontStyle: 'italic',
+        color: '#777799'
+      });
+      this.cluesPanelContainer.add(hint);
+    } else {
+      cluesList.forEach((clue, idx) => {
+        const itemY = 34 + idx * 42;
+        const clueBadge = this.add.text(10, itemY, `✓ CLUE #${clue.step}: ${clue.shortHint || clue.region.toUpperCase()}`, {
+          fontFamily: 'sans-serif',
+          fontSize: '10px',
+          fontStyle: 'bold',
+          color: '#00F0FF'
+        });
+
+        const finder = this.add.text(10, itemY + 16, `Found by: ${clue.discoverer}`, {
+          fontFamily: 'sans-serif',
+          fontSize: '9px',
+          color: clue.colorHex || '#FFFFFF'
+        });
+
+        this.cluesPanelContainer.add([clueBadge, finder]);
+      });
+    }
+  }
+
+  // Large 6-Second Public Clue Discovery Banner
+  showPublicClueBanner(data) {
+    const banner = this.add.container(WORLD_WIDTH / 2, -140);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x050518, 0.96);
+    bg.fillRoundedRect(-360, -50, 720, 100, 16);
+    bg.lineStyle(3, 0x00F0FF, 1);
+    bg.strokeRoundedRect(-360, -50, 720, 100, 16);
+
+    const title = this.add.text(0, -26, `📜 PUBLIC CLUE #${data.step}/3 DISCOVERED!`, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '24px',
+      color: '#00F0FF',
+      letterSpacing: 3
+    }).setOrigin(0.5);
+
+    const clueText = this.add.text(0, 4, `"${data.text}"`, {
+      fontFamily: 'sans-serif',
+      fontSize: '15px',
+      fontStyle: 'bold',
+      color: '#FFE600',
+      letterSpacing: 0.5
+    }).setOrigin(0.5);
+
+    const sub = this.add.text(0, 30, `FOUND BY ${data.discoverer.toUpperCase()} | TARGET: ${(data.shortHint || '').toUpperCase()}`, {
+      fontFamily: 'sans-serif',
+      fontSize: '11px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      letterSpacing: 1.5
+    }).setOrigin(0.5);
+
+    banner.add([bg, title, clueText, sub]);
+    banner.setDepth(250);
+
+    // Slide down, stay for 6 seconds, slide up
+    this.tweens.add({
+      targets: banner,
+      y: 150,
+      duration: 600,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(5200, () => {
+          this.tweens.add({
+            targets: banner,
+            y: -160,
+            duration: 500,
+            ease: 'Cubic.easeIn',
+            onComplete: () => banner.destroy()
+          });
+        });
+      }
+    });
+  }
+
+  // Final Revelation Banner (8:00 Mark)
+  showFinalRevelationBanner(data) {
+    const banner = this.add.container(WORLD_WIDTH / 2, -140);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x180028, 0.96);
+    bg.fillRoundedRect(-380, -50, 760, 100, 16);
+    bg.lineStyle(3, 0xFFE600, 1);
+    bg.strokeRoundedRect(-380, -50, 760, 100, 16);
+
+    const title = this.add.text(0, -24, '👑 FINAL REVELATION 👑', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '28px',
+      color: '#FFE600',
+      letterSpacing: 4
+    }).setOrigin(0.5);
+
+    const desc = this.add.text(0, 12, `The Legendary Vault (${data.vaultName}) is exposed in CITADEL CASTLE!`, {
+      fontFamily: 'sans-serif',
+      fontSize: '15px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      letterSpacing: 1
+    }).setOrigin(0.5);
+
+    banner.add([bg, title, desc]);
+    banner.setDepth(260);
+
+    this.tweens.add({
+      targets: banner,
+      y: 150,
+      duration: 600,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(5200, () => {
+          this.tweens.add({
+            targets: banner,
+            y: -160,
+            duration: 500,
+            ease: 'Cubic.easeIn',
+            onComplete: () => banner.destroy()
+          });
+        });
+      }
+    });
+  }
+
+  // Grand Full-Screen Celebration on Legendary Treasure Claim (+150 pts)
+  showLegendaryFoundCelebration(data) {
+    this.celebrationContainer.removeAll(true);
+
+    const overlay = this.add.graphics();
+    overlay.fillStyle(0x050515, 0.88);
+    overlay.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.celebrationContainer.add(overlay);
+
+    const card = this.add.graphics();
+    card.fillStyle(0x141432, 0.98);
+    card.fillRoundedRect(WORLD_WIDTH / 2 - 420, WORLD_HEIGHT / 2 - 160, 840, 320, 24);
+    card.lineStyle(4, 0xFFE600, 1);
+    card.strokeRoundedRect(WORLD_WIDTH / 2 - 420, WORLD_HEIGHT / 2 - 160, 840, 320, 24);
+    this.celebrationContainer.add(card);
+
+    const trophy = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 90, '👑 🏆 👑', {
+      fontSize: '44px'
+    }).setOrigin(0.5);
+
+    const title = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 25, 'LEGENDARY TREASURE FOUND!', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '38px',
+      color: '#FFE600',
+      letterSpacing: 4
+    }).setOrigin(0.5);
+
+    const winner = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 35, `${data.playerName.toUpperCase()} DISCOVERED ${data.vaultName.toUpperCase()}`, {
+      fontFamily: 'sans-serif',
+      fontSize: '22px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      letterSpacing: 2
+    }).setOrigin(0.5);
+
+    const pts = this.add.text(WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 85, `+${data.points || 150} POINTS AWARDED`, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '28px',
+      color: '#39FF14',
+      letterSpacing: 3
+    }).setOrigin(0.5);
+
+    this.celebrationContainer.add([trophy, title, winner, pts]);
+
+    // Auto dismiss celebration after 6.5s
+    this.time.delayedCall(6500, () => {
+      this.tweens.add({
+        targets: this.celebrationContainer,
+        alpha: 0,
+        duration: 800,
+        onComplete: () => {
+          this.celebrationContainer.removeAll(true);
+          this.celebrationContainer.setAlpha(1);
+        }
+      });
+    });
+  }
+
   triggerStartMatch() {
     if (currentGameState.state === 'LOBBY' && currentGameState.canStart) {
       socket.emit('start_match');
@@ -306,6 +549,8 @@ class HostScene extends Phaser.Scene {
       this.endedContainer.setVisible(false);
       this.hudContainer.removeAll(true);
       this.eventFeedContainer.removeAll(true);
+      this.cluesPanelContainer.removeAll(true);
+      this.celebrationContainer.removeAll(true);
       this.hostEvents = [];
       this.clearAllPlayerEntities();
       this.mapGraphics.clear();
@@ -673,13 +918,13 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Draw Live Interactables on Arena (Treasures, Chests, Portals, Keys, Glitch Items)
+  // Draw Live Interactables on Arena (Treasures, Chests, Portals, Keys, Glitch Items, Clues & Legendary Vault)
   drawActiveInteractables(entities) {
     this.interactablesGraphics.clear();
     if (!entities) return;
 
     for (const ent of entities) {
-      if (ent.state !== 'active') continue;
+      if (ent.state !== 'active' && ent.state !== 'revealed') continue;
 
       if (ent.type === 'treasure') {
         this.interactablesGraphics.fillStyle(ent.colorNum || 0x00f0ff, 0.9);
@@ -705,6 +950,32 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.strokeCircle(ent.x, ent.y, 12);
         this.interactablesGraphics.fillStyle(0xFFFFFF, 0.9);
         this.interactablesGraphics.fillCircle(ent.x - 3, ent.y - 3, 3);
+      } else if (ent.type === 'clue') {
+        // Active Legendary Clue Beacon (Pulsing Cyan Scroll)
+        this.interactablesGraphics.fillStyle(0x00F0FF, 0.95);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 14);
+        this.interactablesGraphics.lineStyle(2.5, 0xFFFFFF, 1);
+        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 14);
+        this.interactablesGraphics.fillStyle(0x050518, 1);
+        this.interactablesGraphics.fillRect(ent.x - 6, ent.y - 6, 12, 12);
+      } else if (ent.type === 'side_clue') {
+        // Minor Side Clue Glyph
+        this.interactablesGraphics.fillStyle(0x00FFCC, 0.9);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 11);
+        this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
+        this.interactablesGraphics.strokeCircle(ent.x, ent.y, 11);
+      } else if (ent.type === 'legendary_vault') {
+        // Glorious Golden Legendary Vault
+        this.interactablesGraphics.fillStyle(0xFFE600, 1);
+        this.interactablesGraphics.fillRoundedRect(ent.x - 22, ent.y - 22, 44, 44, 8);
+        this.interactablesGraphics.lineStyle(3, 0xFFFFFF, 1);
+        this.interactablesGraphics.strokeRoundedRect(ent.x - 22, ent.y - 22, 44, 44, 8);
+        
+        // Inner crown star
+        this.interactablesGraphics.fillStyle(0x050518, 1);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 10);
+        this.interactablesGraphics.fillStyle(0xFFE600, 1);
+        this.interactablesGraphics.fillCircle(ent.x, ent.y, 5);
       } else if (ent.type === 'chest') {
         this.interactablesGraphics.fillStyle(0xFFAA00, 0.95);
         this.interactablesGraphics.fillRoundedRect(ent.x - 14, ent.y - 12, 28, 24, 4);
@@ -747,9 +1018,9 @@ class HostScene extends Phaser.Scene {
     this.leaderboardContainer.removeAll(true);
     if (currentGameState.state !== 'RUNNING') return;
 
-    const startX = WORLD_WIDTH - 210;
+    const startX = WORLD_WIDTH - 220;
     const startY = 30;
-    const width = 180;
+    const width = 190;
 
     const bg = this.add.graphics();
     bg.fillStyle(0x0a0a1e, 0.85);
@@ -1253,6 +1524,10 @@ class HostScene extends Phaser.Scene {
 
     if (snapshot.lb) {
       this.drawHostLeaderboard(snapshot.lb);
+    }
+
+    if (snapshot.clues) {
+      this.drawKnownCluesPanel(snapshot.clues.knownClues, snapshot.clues.chainTitle, snapshot.clues);
     }
   }
 

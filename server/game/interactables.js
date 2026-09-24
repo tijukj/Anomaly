@@ -1,4 +1,4 @@
-// server/game/interactables.js - Server-authoritative interactables, transient glitch treasures & mission triggers
+// server/game/interactables.js - Server-authoritative interactables, transient glitch treasures & clue triggers
 import { CONFIG } from '../config.js';
 import { POI_POOLS } from './mapData.js';
 import { createRng } from './seededRng.js';
@@ -175,7 +175,7 @@ export class InteractableManager {
     console.log(`[Interactables] Initialized ${this.entities.size} interactive entities for match.`);
   }
 
-  // 20Hz Tick: Process respawns, glitch treasures and update player prompts
+  // 20Hz Tick: Process respawns, glitch treasures, clues and update player prompts
   tick(activePlayers, currentPhase) {
     const now = Date.now();
 
@@ -249,8 +249,14 @@ export class InteractableManager {
     let nearest = null;
     let nearestDist = Infinity;
 
-    for (const ent of this.entities.values()) {
-      if (ent.state !== 'active') continue;
+    // Combine standard entities with active clues & legendary vault
+    const allInteractables = [
+      ...Array.from(this.entities.values()),
+      ...(this.gameManager.clues ? this.gameManager.clues.getActiveEntities() : [])
+    ];
+
+    for (const ent of allInteractables) {
+      if (ent.state !== 'active' && ent.state !== 'revealed') continue;
 
       const dist = Math.hypot(player.x - ent.x, player.y - ent.y);
       if (dist <= ent.radius && dist < nearestDist) {
@@ -267,10 +273,18 @@ export class InteractableManager {
     };
 
     if (nearest) {
-      actionState = this.getInteractablePrompt(player, nearest, now);
+      if (nearest.type === 'clue' || nearest.type === 'side_clue' || nearest.type === 'legendary_vault') {
+        actionState = this.gameManager.clues.getPrompt(player, nearest) || actionState;
+      } else {
+        actionState = this.getInteractablePrompt(player, nearest, now);
+      }
 
       if (player.input && player.input.action) {
-        this.handleActionPress(player, nearest, now);
+        if (nearest.type === 'clue' || nearest.type === 'side_clue' || nearest.type === 'legendary_vault') {
+          this.gameManager.clues.handleAction(player, nearest, now);
+        } else {
+          this.handleActionPress(player, nearest, now);
+        }
       } else if (nearest.type === 'chest' && nearest.holdingPlayers) {
         nearest.holdingPlayers.delete(player.id);
       }
@@ -521,7 +535,7 @@ export class InteractableManager {
   }
 
   getVisibleEntities() {
-    return Array.from(this.entities.values()).map(e => ({
+    const standard = Array.from(this.entities.values()).map(e => ({
       id: e.id,
       type: e.type,
       tier: e.tier,
@@ -536,5 +550,8 @@ export class InteractableManager {
       expiresAt: e.expiresAt,
       durationSec: e.durationSec
     }));
+
+    const clues = this.gameManager.clues ? this.gameManager.clues.getActiveEntities() : [];
+    return [...standard, ...clues];
   }
 }

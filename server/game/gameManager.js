@@ -1,10 +1,11 @@
-// server/game/gameManager.js - Authoritative game lifecycle, timeline, physics, missions & scoring
+// server/game/gameManager.js - Authoritative game lifecycle, timeline, physics, missions, clues & scoring
 import { CONFIG } from '../config.js';
 import { MAP_REGIONS, RIVER_ZONES, BRIDGES, STATIC_WALLS, SECRET_PASSAGE_WALL, POI_POOLS } from './mapData.js';
 import { createRng } from './seededRng.js';
 import { ScoringSystem } from './scoring.js';
 import { InteractableManager } from './interactables.js';
 import { MissionManager } from './missions.js';
+import { ClueManager } from './clueManager.js';
 import crypto from 'crypto';
 
 export class GameManager {
@@ -19,6 +20,7 @@ export class GameManager {
 
     // Subsystems
     this.scoring = new ScoringSystem(io);
+    this.clues = new ClueManager(this, this.scoring);
     this.interactables = new InteractableManager(this, this.scoring);
     this.missions = new MissionManager(this, this.scoring);
 
@@ -74,6 +76,7 @@ export class GameManager {
       merchants: selectedMerchants
     };
 
+    this.clues.initForMatch(this.matchSeed);
     this.interactables.initForMatch(this.matchSeed, this.seededPois, this.currentPhase);
     this.missions.initForMatch(this.matchSeed);
     console.log(`[Map] Seeded Match Initialized [Seed: #${this.matchSeed}] [Duration: ${this.totalMatchDurationSec}s]`);
@@ -117,17 +120,20 @@ export class GameManager {
       this.resolvePlayerCollisions(activePlayerList);
       this.checkRegionDiscoveries(activePlayerList);
 
-      // 3. Interactables & Smart Action Button
+      // 3. Clues & Timeline Triggers
+      this.clues.tick(Date.now(), elapsedFraction);
+
+      // 4. Interactables & Smart Action Button
       this.interactables.tick(activePlayerList, this.currentPhase);
 
-      // 4. Dynamic Missions Lifecycle
+      // 5. Dynamic Missions Lifecycle
       this.missions.tick(activePlayerList, this.matchTimeRemaining, this.totalMatchDurationSec);
 
-      // 5. Compute Live Leaderboard
+      // 6. Compute Live Leaderboard
       const leaderboard = this.scoring.getLeaderboard(this.players);
       const rankMap = new Map(leaderboard.map(item => [item.id, item]));
 
-      // 6. Send Contextual HUD to each Phone Controller
+      // 7. Send Contextual HUD to each Phone Controller
       for (const player of activePlayerList) {
         const socket = this.io.sockets.sockets.get(player.socketId);
         if (socket) {
@@ -147,7 +153,7 @@ export class GameManager {
         }
       }
 
-      // 7. Broadcast 20Hz Snapshot to Host
+      // 8. Broadcast 20Hz Snapshot to Host
       this.broadcastSnapshot(leaderboard);
     }
 
@@ -581,6 +587,7 @@ export class GameManager {
       playerCount: activePlayers.length,
       canStart: activePlayers.length >= CONFIG.MIN_PLAYERS_TO_START,
       seed: this.matchSeed,
+      clueState: this.clues ? this.clues.getPublicClueState() : null,
       players: activePlayers.map(p => ({
         id: p.id,
         name: p.name,
@@ -617,7 +624,8 @@ export class GameManager {
       sd: this.secretDoorOpen,
       p: activePlayers,
       e: this.interactables.getVisibleEntities(),
-      lb: leaderboard.slice(0, 5) // Top 5 leaderboard for host HUD
+      lb: leaderboard.slice(0, 5), // Top 5 leaderboard for host HUD
+      clues: this.clues ? this.clues.getPublicClueState() : null
     };
 
     this.io.emit('snapshot', snapshot);
