@@ -1,5 +1,7 @@
 // public/play/play.js - Mobile Controller Client Logic
-const socket = io();
+const socket = io({
+  transports: ['websocket', 'polling']
+});
 
 const STORAGE_KEYS = {
   PLAYER_ID: 'anomaly_player_id',

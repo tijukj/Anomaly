@@ -4,6 +4,7 @@ export const CONFIG = {
   // Network & Server
   PORT: process.env.PORT || 3000,
   HOST: '0.0.0.0',
+  PUBLIC_URL: process.env.PUBLIC_URL || '', // Optional explicit domain (e.g. https://anomaly.onrender.com)
   TICK_RATE: 20, // 20 ticks per second
   TICK_INTERVAL_MS: 1000 / 20, // 50ms per tick
   INPUT_HEARTBEAT_MS: 250, // 250ms heartbeat for controller inputs

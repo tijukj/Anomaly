@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: anomaly
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /ping
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production

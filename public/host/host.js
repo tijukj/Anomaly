@@ -1,16 +1,17 @@
 // public/host/host.js - Big Screen Phaser 3 Host Arena & Lobby
-const socket = io();
+const socket = io({
+  transports: ['websocket', 'polling']
+});
 
 const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 1000;
 
 let serverInfo = {
-  addresses: [{ address: '127.0.0.1', name: 'localhost' }],
-  primaryIp: '127.0.0.1',
+  publicUrl: '',
   port: 3000
 };
 
-let currentAddressIndex = 0;
+let playUrl = `${window.location.origin}/play`;
 
 let currentGameState = {
   state: 'LOBBY',
@@ -26,13 +27,19 @@ let snapshotBytes = 0;
 let serverTickTimeMs = 0;
 let showDebugOverlay = false;
 
-// Fetch server info
+// Fetch server config info
 async function fetchServerInfo() {
   try {
     const res = await fetch('/api/server-info');
     serverInfo = await res.json();
+    if (serverInfo.publicUrl) {
+      playUrl = `${serverInfo.publicUrl.replace(/\/+$/, '')}/play`;
+    } else {
+      playUrl = `${window.location.origin}/play`;
+    }
   } catch (err) {
     console.error('Failed to fetch server info:', err);
+    playUrl = `${window.location.origin}/play`;
   }
 }
 
@@ -43,14 +50,13 @@ class HostScene extends Phaser.Scene {
     this.debugContainer = null;
   }
 
-  preload() {
-    // Initial QR code load
-    this.load.image('qrcode', '/api/qr.png');
+  async preload() {
+    await fetchServerInfo();
+    const qrEndpoint = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
+    this.load.image('qrcode', qrEndpoint);
   }
 
-  async create() {
-    await fetchServerInfo();
-
+  create() {
     this.cameras.main.setBackgroundColor('#070714');
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
@@ -68,10 +74,6 @@ class HostScene extends Phaser.Scene {
       showDebugOverlay = !showDebugOverlay;
       this.debugContainer.setVisible(showDebugOverlay);
     });
-
-    // Press 'L' to cycle through detected network IP addresses
-    this.lKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
-    this.lKey.on('down', () => this.cycleNetworkAddress());
 
     // Socket Event: Full state update
     socket.on('game_state_update', (state) => {
@@ -100,35 +102,6 @@ class HostScene extends Phaser.Scene {
     this.renderLobbyUI();
     this.setupDebugOverlay();
     this.debugContainer.setVisible(showDebugOverlay);
-  }
-
-  getCurrentPlayUrl() {
-    const list = serverInfo.addresses || [];
-    const iface = list[currentAddressIndex] || { address: serverInfo.primaryIp || '127.0.0.1' };
-    return `http://${iface.address}:${serverInfo.port || 3000}/play`;
-  }
-
-  cycleNetworkAddress() {
-    if (currentGameState.state !== 'LOBBY') return;
-    const list = serverInfo.addresses || [];
-    if (list.length <= 1) return;
-
-    currentAddressIndex = (currentAddressIndex + 1) % list.length;
-    const currentIface = list[currentAddressIndex];
-
-    console.log(`[Host] Cycled to IP: ${currentIface.address} (${currentIface.name})`);
-
-    // Reload QR code texture dynamically
-    if (this.textures.exists('qrcode')) {
-      this.textures.remove('qrcode');
-    }
-
-    const qrUrl = `/api/qr.png?ip=${encodeURIComponent(currentIface.address)}&t=${Date.now()}`;
-    this.load.image('qrcode', qrUrl);
-    this.load.once('complete', () => {
-      this.renderLobbyUI();
-    });
-    this.load.start();
   }
 
   triggerStartMatch() {
@@ -203,7 +176,7 @@ class HostScene extends Phaser.Scene {
     const w = WORLD_WIDTH;
     const h = WORLD_HEIGHT;
 
-    // 1. Header Title
+    // 1. Title Header
     const title = this.add.text(w / 2, 65, 'A N O M A L Y', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '64px',
@@ -220,7 +193,7 @@ class HostScene extends Phaser.Scene {
 
     this.lobbyContainer.add([title, subtitle]);
 
-    // 2. Left Panel: QR Code & Join Info Box
+    // 2. Left Panel: QR Code & Join Box
     const leftX = w * 0.28;
     const leftY = 515;
     const boxW = 460;
@@ -242,7 +215,7 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.lobbyContainer.add(scanHeader);
 
-    // QR Image sprite
+    // QR Image Sprite
     if (this.textures.exists('qrcode')) {
       const qrSprite = this.add.image(leftX, leftY - 45, 'qrcode');
       qrSprite.setDisplaySize(230, 230);
@@ -256,30 +229,21 @@ class HostScene extends Phaser.Scene {
       letterSpacing: 1
     }).setOrigin(0.5);
 
-    const currentUrl = this.getCurrentPlayUrl();
-    const urlDisplay = this.add.text(leftX, leftY + 135, currentUrl, {
+    const urlDisplay = this.add.text(leftX, leftY + 135, playUrl, {
       fontFamily: 'monospace',
-      fontSize: '19px',
+      fontSize: playUrl.length > 32 ? '15px' : '18px',
       fontStyle: 'bold',
       color: '#FFE600'
     }).setOrigin(0.5);
 
-    const list = serverInfo.addresses || [];
-    const ifaceName = list[currentAddressIndex] ? list[currentAddressIndex].name : 'Wi-Fi';
-    const cycleHint = this.add.text(leftX, leftY + 175, `[ Adapter: ${ifaceName} | Press L to Switch IP (${currentAddressIndex + 1}/${list.length}) ]`, {
-      fontFamily: 'sans-serif',
-      fontSize: '12px',
-      color: '#00F0FF'
-    }).setOrigin(0.5);
+    this.lobbyContainer.add([orLabel, urlDisplay]);
 
-    this.lobbyContainer.add([orLabel, urlDisplay, cycleHint]);
-
-    // 3. Right Panel: Player Roster & Live Counter
+    // 3. Right Panel: Player Roster
     const rightX = w * 0.72;
     const rightY = 270;
     const rightW = 560;
 
-    const rosterHeader = this.add.text(rightX, rightY, `RACERS CONNECTED: ${currentGameState.playerCount}/20`, {
+    const rosterHeader = this.add.text(rightX, rightY, `PLAYERS JOINED: ${currentGameState.playerCount}/20`, {
       fontFamily: 'sans-serif',
       fontSize: '22px',
       fontStyle: 'bold',
@@ -287,7 +251,7 @@ class HostScene extends Phaser.Scene {
       letterSpacing: 3
     }).setOrigin(0.5, 0);
 
-    const phoneCountSub = this.add.text(rightX, rightY + 32, `Phones Connected: ${currentGameState.playerCount}`, {
+    const readySub = this.add.text(rightX, rightY + 32, `Controllers Connected: ${currentGameState.playerCount}`, {
       fontFamily: 'sans-serif',
       fontSize: '15px',
       fontStyle: 'bold',
@@ -295,10 +259,10 @@ class HostScene extends Phaser.Scene {
       letterSpacing: 1
     }).setOrigin(0.5, 0);
 
-    this.lobbyContainer.add([rosterHeader, phoneCountSub]);
+    this.lobbyContainer.add([rosterHeader, readySub]);
 
     if (currentGameState.players.length === 0) {
-      const emptyMsg = this.add.text(rightX, rightY + 100, 'Waiting for racers to connect...\nScan the QR code on your phone to enter.', {
+      const emptyMsg = this.add.text(rightX, rightY + 100, 'Waiting for racers to join...\nScan the QR code on your phone to enter.', {
         fontFamily: 'sans-serif',
         fontSize: '18px',
         color: '#555577',

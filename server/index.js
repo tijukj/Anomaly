@@ -2,7 +2,6 @@
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import QRCode from 'qrcode';
@@ -15,71 +14,17 @@ const ROOT_DIR = path.join(__dirname, '..');
 
 const app = express();
 const server = http.createServer(app);
+
+// Socket.IO with WebSocket first and polling fallback
 const io = new Server(server, {
+  transports: ['websocket', 'polling'],
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
   }
 });
 
-// Helper to detect all available LAN IPv4 addresses
-export function getAllLanIps() {
-  const interfaces = os.networkInterfaces();
-  const list = [];
-
-  for (const name of Object.keys(interfaces)) {
-    for (const net of interfaces[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        const isVirtual = /vEthernet|WSL|VirtualBox|VMware|Hyper-V|Tailscale|ZeroTier|TAP|VPN|Loopback/i.test(name);
-        const isWifi = /wi-?fi|wlan|wireless/i.test(name);
-        const isEthernet = /eth|ethernet|en[0-9]/i.test(name);
-        const priority = isWifi ? 1 : (isEthernet ? 2 : (isVirtual ? 4 : 3));
-
-        list.push({
-          address: net.address,
-          name: name,
-          isVirtual,
-          isWifi,
-          isEthernet,
-          priority
-        });
-      }
-    }
-  }
-
-  list.sort((a, b) => a.priority - b.priority);
-  return list.length > 0 ? list : [{ address: '127.0.0.1', name: 'localhost', priority: 9 }];
-}
-
-const ALL_LAN_IPS = getAllLanIps();
-const PRIMARY_IP = ALL_LAN_IPS[0].address;
-
-// In-memory cache of generated QR code PNG buffers by IP
-const qrCache = new Map();
-
-async function getOrCreateQrBuffer(ip) {
-  const targetIp = ip || PRIMARY_IP;
-  if (qrCache.has(targetIp)) {
-    return qrCache.get(targetIp);
-  }
-  const playUrl = `http://${targetIp}:${CONFIG.PORT}/play`;
-  const buf = await QRCode.toBuffer(playUrl, {
-    type: 'png',
-    margin: 1,
-    width: 320,
-    color: {
-      dark: '#00F0FF',
-      light: '#080816'
-    }
-  });
-  qrCache.set(targetIp, buf);
-  return buf;
-}
-
-// Pre-cache primary IP
-await getOrCreateQrBuffer(PRIMARY_IP);
-
-// Serve Phaser library from node_modules
+// Serve Phaser from node_modules
 app.use('/vendor/phaser', express.static(path.join(ROOT_DIR, 'node_modules/phaser/dist')));
 
 // Serve Static client directories
@@ -92,14 +37,15 @@ app.get('/', (req, res) => {
   res.redirect('/host');
 });
 
-// Diagnostic /ping page to test phone connectivity from a mobile browser
+// Health check / ping endpoint
 app.get('/ping', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ANOMALY // Server Reachable</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ANOMALY // Status</title>
   <style>
     body {
       background-color: #070714;
@@ -111,64 +57,83 @@ app.get('/ping', (req, res) => {
       justify-content: center;
       height: 100vh;
       margin: 0;
-      padding: 20px;
       text-align: center;
-      box-sizing: border-box;
     }
-    .badge { font-size: 50px; margin-bottom: 12px; }
-    h1 { color: #39FF14; font-size: 26px; margin: 0 0 12px 0; letter-spacing: 1px; }
-    p { color: #9999BB; font-size: 16px; max-width: 340px; line-height: 1.5; margin: 0 0 24px 0; }
-    .join-btn {
-      display: inline-block;
-      padding: 16px 36px;
+    h1 { color: #39FF14; font-size: 26px; margin-bottom: 8px; }
+    p { color: #8888AA; font-size: 16px; margin-bottom: 20px; }
+    a {
+      padding: 12px 24px;
       background: #00F0FF;
       color: #050510;
       text-decoration: none;
-      font-weight: 800;
-      font-size: 18px;
-      letter-spacing: 2px;
-      border-radius: 12px;
-      box-shadow: 0 0 20px rgba(0, 240, 255, 0.5);
+      font-weight: bold;
+      border-radius: 8px;
     }
   </style>
 </head>
 <body>
-  <div class="badge">⚡</div>
   <h1>ANOMALY server reachable</h1>
-  <p>Your phone is successfully connected to the laptop game server over Wi-Fi!</p>
-  <a href="/play" class="join-btn">JOIN GAME</a>
+  <p>Online and accepting connections.</p>
+  <a href="/play">JOIN GAME</a>
 </body>
 </html>`);
 });
 
-// Dynamic QR Code PNG endpoint with optional ?ip= query
+// Dynamic QR Code generation for any play URL
+const qrCache = new Map();
 app.get('/api/qr.png', async (req, res) => {
   try {
-    const requestedIp = (req.query.ip || PRIMARY_IP).toString();
-    const buf = await getOrCreateQrBuffer(requestedIp);
+    const rawUrl = req.query.url;
+    let targetUrl = rawUrl;
+
+    if (!targetUrl) {
+      if (CONFIG.PUBLIC_URL) {
+        targetUrl = `${CONFIG.PUBLIC_URL}/play`;
+      } else {
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+        const host = req.get('host') || `localhost:${CONFIG.PORT}`;
+        targetUrl = `${protocol}://${host}/play`;
+      }
+    }
+
+    if (qrCache.has(targetUrl)) {
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(qrCache.get(targetUrl));
+    }
+
+    const buf = await QRCode.toBuffer(targetUrl, {
+      type: 'png',
+      margin: 1,
+      width: 320,
+      color: {
+        dark: '#00F0FF',
+        light: '#080816'
+      }
+    });
+
+    qrCache.set(targetUrl, buf);
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=600');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buf);
   } catch (err) {
     res.status(500).send('Failed to generate QR');
   }
 });
 
-// API route for host info
+// API route for client configuration
 app.get('/api/server-info', (req, res) => {
   res.json({
-    addresses: getAllLanIps(),
-    primaryIp: PRIMARY_IP,
+    publicUrl: CONFIG.PUBLIC_URL,
     port: CONFIG.PORT,
-    playUrl: `http://${PRIMARY_IP}:${CONFIG.PORT}/play`,
     world: CONFIG.WORLD
   });
 });
 
-// Initialize Authoritative Game Manager
+// Authoritative Game Manager
 const gameManager = new GameManager(io);
 
-// Socket.IO event handling
+// Socket.IO event listeners
 io.on('connection', (socket) => {
   socket.emit('game_state_update', gameManager.getPublicState());
 
@@ -189,21 +154,18 @@ io.on('connection', (socket) => {
   });
 });
 
-// Start Server listening on 0.0.0.0
+// Start listening on 0.0.0.0
 server.listen(CONFIG.PORT, CONFIG.HOST, () => {
-  console.log('\n' + '='.repeat(62));
-  console.log('  ⚡ ANOMALY SERVER RUNNING ⚡');
-  console.log('='.repeat(62));
-  console.log(`  🖥️  Host Screen (Big Canvas) : http://localhost:${CONFIG.PORT}/host`);
-  console.log(`  📱  Primary Player Join URL  : http://${PRIMARY_IP}:${CONFIG.PORT}/play`);
-  console.log(`  🔌  Diagnostic Ping Test     : http://${PRIMARY_IP}:${CONFIG.PORT}/ping`);
-  console.log('-'.repeat(62));
-  console.log('  🌐 ALL DETECTED LOCAL NETWORK ADDRESSES:');
-  ALL_LAN_IPS.forEach((iface, idx) => {
-    const tag = iface.isWifi ? '(Wi-Fi ⭐)' : (iface.isEthernet ? '(Ethernet)' : '(Virtual/VPN)');
-    console.log(`    [${idx + 1}] http://${iface.address}:${CONFIG.PORT}/play  ${tag}`);
-  });
-  console.log('-'.repeat(62));
+  const localHostUrl = `http://localhost:${CONFIG.PORT}/host`;
+  const localPlayUrl = `http://localhost:${CONFIG.PORT}/play`;
+  const liveUrl = CONFIG.PUBLIC_URL ? `${CONFIG.PUBLIC_URL}/play` : localPlayUrl;
+
+  console.log('\n' + '='.repeat(54));
+  console.log('  ⚡ ANOMALY SERVER ONLINE ⚡');
+  console.log('='.repeat(54));
+  console.log(`  🖥️  Host Screen (Big Canvas) : ${localHostUrl}`);
+  console.log(`  📱  Player Join URL          : ${liveUrl}`);
+  console.log(`  🔌  Health Check / Ping      : http://localhost:${CONFIG.PORT}/ping`);
   console.log(`  ⏱️  Authoritative Tick Rate  : ${CONFIG.TICK_RATE} ticks/sec`);
-  console.log('='.repeat(62) + '\n');
+  console.log('='.repeat(54) + '\n');
 });
