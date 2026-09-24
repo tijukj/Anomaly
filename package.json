@@ -7,13 +7,16 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "bots": "node server/game/bots.js"
+    "bots": "node server/game/bots.js",
+    "doctor": "node scripts/doctor.js",
+    "firewall": "powershell -ExecutionPolicy Bypass -File scripts/firewall-setup.ps1",
+    "unfirewall": "powershell -ExecutionPolicy Bypass -File scripts/firewall-remove.ps1"
   },
   "dependencies": {
     "express": "^4.21.2",
     "phaser": "^3.88.2",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.1"
   }
 }
