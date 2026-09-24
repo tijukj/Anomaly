@@ -1613,4 +1613,16 @@ const config = {
   scene: [HostScene]
 };
 
-new Phaser.Game(config);
+function launchGame() {
+  if (document.getElementById('game-container')) {
+    new Phaser.Game(config);
+  } else {
+    window.addEventListener('DOMContentLoaded', () => new Phaser.Game(config));
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', launchGame);
+} else {
+  launchGame();
+}
