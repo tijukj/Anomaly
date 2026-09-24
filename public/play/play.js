@@ -131,6 +131,8 @@ function applyPlayerTheme(player) {
 // -------------------------------------------------------------
 // Floating Analog Joystick Logic
 // -------------------------------------------------------------
+const DEADZONE = 0.06;
+
 joystickZone.addEventListener('touchstart', (e) => {
   e.preventDefault();
   if (joystickActive) return;
@@ -150,7 +152,7 @@ joystickZone.addEventListener('touchstart', (e) => {
 
   currentInput.x = 0;
   currentInput.y = 0;
-  transmitInputIfChanged();
+  transmitInputIfChanged(true);
 }, { passive: false });
 
 joystickZone.addEventListener('touchmove', (e) => {
@@ -178,9 +180,18 @@ joystickZone.addEventListener('touchmove', (e) => {
 
       joystickKnob.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
 
-      currentInput.x = Math.round((clampedX / MAX_JOYSTICK_RADIUS) * 100) / 100;
-      currentInput.y = Math.round((clampedY / MAX_JOYSTICK_RADIUS) * 100) / 100;
-      transmitInputIfChanged();
+      const normalizedDist = Math.min(MAX_JOYSTICK_RADIUS, distance) / MAX_JOYSTICK_RADIUS;
+      if (normalizedDist < DEADZONE) {
+        currentInput.x = 0;
+        currentInput.y = 0;
+      } else {
+        const angle = Math.atan2(deltaY, deltaX);
+        const curvedMag = Math.pow((normalizedDist - DEADZONE) / (1 - DEADZONE), 1.15);
+        currentInput.x = Math.round(Math.cos(angle) * curvedMag * 100) / 100;
+        currentInput.y = Math.round(Math.sin(angle) * curvedMag * 100) / 100;
+      }
+
+      transmitInputIfChanged(false);
       break;
     }
   }
@@ -193,7 +204,7 @@ function resetJoystick() {
   joystickKnob.style.transform = 'translate(-50%, -50%)';
   currentInput.x = 0;
   currentInput.y = 0;
-  transmitInputIfChanged();
+  transmitInputIfChanged(true);
 }
 
 joystickZone.addEventListener('touchend', (e) => {
@@ -236,29 +247,33 @@ actionBtn.addEventListener('pointercancel', releaseAction);
 actionBtn.addEventListener('pointerleave', releaseAction);
 
 // -------------------------------------------------------------
-// Input Transmission Loop (20Hz + 250ms Heartbeat)
+// Low-Latency Synchronized Input Loop (30Hz + Heartbeat)
 // -------------------------------------------------------------
+const TRANSMIT_INTERVAL_MS = 33; // ~30Hz smooth transmission rate
+let lastTransmitTime = 0;
+
 function transmitInputIfChanged(force = false) {
   if (!localPlayer || currentGameState !== 'RUNNING') return;
 
   const now = performance.now();
   const hasChanged = 
-    currentInput.x !== lastSentInput.x ||
-    currentInput.y !== lastSentInput.y ||
+    Math.abs(currentInput.x - lastSentInput.x) > 0.015 ||
+    Math.abs(currentInput.y - lastSentInput.y) > 0.015 ||
     currentInput.action !== lastSentInput.action;
 
   const heartbeatExpired = (now - lastSendTimestamp) >= HEARTBEAT_MS;
 
-  if (force || hasChanged || heartbeatExpired) {
+  if (force || (hasChanged && (now - lastTransmitTime >= TRANSMIT_INTERVAL_MS)) || heartbeatExpired) {
     socket.emit('player_input', currentInput);
     lastSentInput = { ...currentInput };
     lastSendTimestamp = now;
+    lastTransmitTime = now;
   }
 }
 
 setInterval(() => {
-  transmitInputIfChanged();
-}, SEND_INTERVAL_MS);
+  transmitInputIfChanged(false);
+}, TRANSMIT_INTERVAL_MS);
 
 // -------------------------------------------------------------
 // Join Form Submission

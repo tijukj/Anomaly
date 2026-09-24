@@ -300,10 +300,19 @@ export class GameManager {
     }
 
     if (inputMag > 0.05) {
-      const dirX = inputX / inputMag;
-      const dirY = inputY / inputMag;
-      player.vx += dirX * CONFIG.PHYSICS.ACCELERATION * dt;
-      player.vy += dirY * CONFIG.PHYSICS.ACCELERATION * dt;
+      const thrust = Math.min(1.0, inputMag);
+      const targetVx = (inputX / inputMag) * currentMaxSpeed * thrust;
+      const targetVy = (inputY / inputMag) * currentMaxSpeed * thrust;
+
+      // Snappy responsive acceleration (reaching target velocity in <100ms)
+      const blendFactor = Math.min(1.0, dt * 16);
+      player.vx += (targetVx - player.vx) * blendFactor;
+      player.vy += (targetVy - player.vy) * blendFactor;
+    } else {
+      // Immediate crisp deceleration when thumb is released (no ice-skating)
+      const brakeFactor = Math.min(1.0, dt * 20);
+      player.vx += (0 - player.vx) * brakeFactor;
+      player.vy += (0 - player.vy) * brakeFactor;
     }
 
     // Velocity Clamping
@@ -313,12 +322,8 @@ export class GameManager {
       player.vy = (player.vy / speed) * currentMaxSpeed;
     }
 
-    // Friction / Damping
-    player.vx *= CONFIG.PHYSICS.FRICTION;
-    player.vy *= CONFIG.PHYSICS.FRICTION;
-
-    if (Math.abs(player.vx) < 0.1) player.vx = 0;
-    if (Math.abs(player.vy) < 0.1) player.vy = 0;
+    if (Math.abs(player.vx) < 0.2) player.vx = 0;
+    if (Math.abs(player.vy) < 0.2) player.vy = 0;
 
     // Apply Position
     player.x += player.vx * dt;

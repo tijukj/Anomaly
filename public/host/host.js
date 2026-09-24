@@ -1611,12 +1611,23 @@ class HostScene extends Phaser.Scene {
 
   update(time, delta) {
     const isRunning = currentGameState.state === 'RUNNING';
-    const lerpFactor = Math.min(1, (delta / 1000) * 18);
+    const lerpFactor = Math.min(1, (delta / 1000) * 25);
 
     for (const entity of this.playerMap.values()) {
       if (isRunning) {
-        entity.currentX += (entity.targetX - entity.currentX) * lerpFactor;
-        entity.currentY += (entity.targetY - entity.currentY) * lerpFactor;
+        const dx = entity.targetX - entity.currentX;
+        const dy = entity.targetY - entity.currentY;
+        const dist = Math.hypot(dx, dy);
+
+        // Snap instantly if teleported or distance too large
+        if (dist > 250) {
+          entity.currentX = entity.targetX;
+          entity.currentY = entity.targetY;
+        } else {
+          entity.currentX += dx * lerpFactor;
+          entity.currentY += dy * lerpFactor;
+        }
+
         entity.container.setPosition(entity.currentX, entity.currentY);
 
         entity.ring.setVisible(entity.action);
