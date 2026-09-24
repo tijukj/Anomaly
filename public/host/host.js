@@ -123,13 +123,6 @@ class HostScene extends Phaser.Scene {
 
     const qrEndpoint = `/api/qr.png?url=${encodeURIComponent(playUrl)}`;
     this.load.image('qrcode', qrEndpoint);
-
-    // If texture finishes loading via Phaser loader, update lobby if active
-    this.load.once('filecomplete-image-qrcode', () => {
-      if (currentGameState.state === 'LOBBY') {
-        this.renderLobbyUI();
-      }
-    });
   }
 
   create() {
@@ -1293,7 +1286,7 @@ class HostScene extends Phaser.Scene {
   }
 
   renderLobbyUI() {
-    if (currentGameState.state !== 'LOBBY') return;
+    if (!this.lobbyContainer || currentGameState.state !== 'LOBBY') return;
     this.lobbyContainer.removeAll(true);
 
     const w = WORLD_WIDTH;
