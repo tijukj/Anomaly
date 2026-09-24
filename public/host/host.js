@@ -35,23 +35,18 @@ let serverTickTimeMs = 0;
 let showDebugOverlay = false;
 let showPoiDebugMarkers = false;
 
-// Pre-fetch server config info
-async function initServerInfo() {
-  try {
-    const res = await fetch('/api/server-info');
-    serverInfo = await res.json();
+// Fetch server info and update URL dynamically
+fetch('/api/server-info')
+  .then(res => res.json())
+  .then(info => {
+    serverInfo = info;
     if (serverInfo.publicUrl) {
       playUrl = `${serverInfo.publicUrl.replace(/\/+$/, '')}/play`;
-    } else {
-      playUrl = `${window.location.origin}/play`;
     }
-  } catch (err) {
-    console.error('Failed to fetch server info:', err);
-    playUrl = `${window.location.origin}/play`;
-  }
-}
-
-await initServerInfo();
+  })
+  .catch(err => {
+    console.warn('Using default playUrl:', err);
+  });
 
 function formatTime(totalSeconds) {
   const mins = Math.floor(totalSeconds / 60);
