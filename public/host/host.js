@@ -17,17 +17,20 @@ let currentGameState = {
   state: 'LOBBY',
   players: [],
   playerCount: 0,
-  canStart: false
+  canStart: false,
+  seed: 0,
+  map: null
 };
 
-// Snapshot interpolation state
+// Snapshot interpolation & debug state
 let latestSnapshot = null;
 let lastSnapshotTime = 0;
 let snapshotBytes = 0;
 let serverTickTimeMs = 0;
 let showDebugOverlay = false;
+let showPoiDebugMarkers = false;
 
-// Pre-fetch server info before Phaser starts
+// Pre-fetch server config info
 async function initServerInfo() {
   try {
     const res = await fetch('/api/server-info');
@@ -50,6 +53,7 @@ class HostScene extends Phaser.Scene {
     super({ key: 'HostScene' });
     this.playerMap = new Map();
     this.debugContainer = null;
+    this.poiDebugContainer = null;
   }
 
   preload() {
@@ -62,6 +66,10 @@ class HostScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
     this.bgGraphics = this.add.graphics();
+    this.mapGraphics = this.add.graphics();
+    this.wallsGraphics = this.add.graphics();
+    this.labelsContainer = this.add.container(0, 0);
+    this.poiDebugContainer = this.add.container(0, 0);
     this.lobbyContainer = this.add.container(0, 0);
     this.arenaContainer = this.add.container(0, 0);
     this.debugContainer = this.add.container(20, 20);
@@ -91,6 +99,13 @@ class HostScene extends Phaser.Scene {
       this.debugContainer.setVisible(showDebugOverlay);
     });
 
+    // Toggle Seeded POI Markers with 'M'
+    this.mKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.mKey.on('down', () => {
+      showPoiDebugMarkers = !showPoiDebugMarkers;
+      this.poiDebugContainer.setVisible(showPoiDebugMarkers);
+    });
+
     // Socket Event: Full state update
     socket.on('game_state_update', (state) => {
       const prevState = currentGameState.state;
@@ -100,6 +115,10 @@ class HostScene extends Phaser.Scene {
       }
       this.renderLobbyUI();
       this.updatePlayerRoster(state.players);
+      if (state.state === 'RUNNING') {
+        this.drawFullMap();
+        this.renderPoiMarkers();
+      }
     });
 
     // Socket Event: 20Hz compact tick snapshot
@@ -114,10 +133,11 @@ class HostScene extends Phaser.Scene {
       }
     });
 
-    this.drawBackground();
+    this.drawBackgroundGrid();
     this.renderLobbyUI();
     this.setupDebugOverlay();
     this.debugContainer.setVisible(showDebugOverlay);
+    this.poiDebugContainer.setVisible(showPoiDebugMarkers);
   }
 
   triggerStartMatch() {
@@ -130,21 +150,26 @@ class HostScene extends Phaser.Scene {
     if (newState === 'RUNNING') {
       this.lobbyContainer.setVisible(false);
       this.arenaContainer.setVisible(true);
-      this.drawArenaBoundary();
+      this.drawFullMap();
+      this.renderPoiMarkers();
     } else {
       this.lobbyContainer.setVisible(true);
       this.arenaContainer.setVisible(false);
       this.clearAllPlayerEntities();
+      this.mapGraphics.clear();
+      this.wallsGraphics.clear();
+      this.labelsContainer.removeAll(true);
+      this.poiDebugContainer.removeAll(true);
       this.renderLobbyUI();
     }
   }
 
-  drawBackground() {
+  drawBackgroundGrid() {
     this.bgGraphics.clear();
     const w = WORLD_WIDTH;
     const h = WORLD_HEIGHT;
 
-    this.bgGraphics.lineStyle(1, 0x14142b, 0.5);
+    this.bgGraphics.lineStyle(1, 0x121226, 0.4);
     const gridSize = 50;
     for (let x = 0; x <= w; x += gridSize) {
       this.bgGraphics.lineBetween(x, 0, x, h);
@@ -154,35 +179,269 @@ class HostScene extends Phaser.Scene {
     }
   }
 
-  drawArenaBoundary() {
-    this.arenaContainer.removeAll(true);
-    const w = WORLD_WIDTH;
-    const h = WORLD_HEIGHT;
-    const pad = 24;
+  // Draw complete neon top-down map: regions, river, bridges, and walls
+  drawFullMap() {
+    this.mapGraphics.clear();
+    this.wallsGraphics.clear();
+    this.labelsContainer.removeAll(true);
 
-    const bounds = this.add.graphics();
-    bounds.lineStyle(4, 0x00F0FF, 0.9);
-    bounds.strokeRoundedRect(pad, pad, w - pad * 2, h - pad * 2, 16);
+    const mapData = currentGameState.map;
+    if (!mapData) return;
 
-    bounds.lineStyle(2, 0xFF0055, 0.8);
-    const cornerSize = 40;
-    bounds.lineBetween(pad, pad + cornerSize, pad, pad);
-    bounds.lineBetween(pad, pad, pad + cornerSize, pad);
+    // 1. Draw Region Zone Backgrounds & Neon Outlines
+    for (const region of mapData.regions) {
+      const b = region.bounds;
+      // Semi-transparent ambient tinted fill
+      this.mapGraphics.fillStyle(region.colorNum, 0.05);
+      this.mapGraphics.fillRect(b.x, b.y, b.width, b.height);
 
-    bounds.lineBetween(w - pad, pad + cornerSize, w - pad, pad);
-    bounds.lineBetween(w - pad, pad, w - pad - cornerSize, pad);
+      // Glowing Region Boundary Box
+      this.mapGraphics.lineStyle(2, region.colorNum, 0.4);
+      this.mapGraphics.strokeRect(b.x, b.y, b.width, b.height);
 
-    bounds.lineBetween(pad, h - pad - cornerSize, pad, h - pad);
-    bounds.lineBetween(pad, h - pad, pad + cornerSize, h - pad);
+      // Floating Region Name Label
+      if (region.id !== 'plaza') {
+        const label = this.add.text(region.labelPos.x, region.labelPos.y, region.name, {
+          fontFamily: '"Impact", "Arial Black", sans-serif',
+          fontSize: '22px',
+          color: region.colorHex,
+          letterSpacing: 4
+        }).setOrigin(0.5).setAlpha(0.75);
+        this.labelsContainer.add(label);
+      }
+    }
 
-    bounds.lineBetween(w - pad, h - pad - cornerSize, w - pad, h - pad);
-    bounds.lineBetween(w - pad, h - pad, w - pad - cornerSize, h - pad);
+    // 2. Draw River (Water Band)
+    this.mapGraphics.fillStyle(0x0088cc, 0.22);
+    this.mapGraphics.fillRect(40, 470, 1520, 120);
 
-    bounds.lineStyle(2, 0x202048, 0.6);
-    bounds.strokeCircle(w / 2, h / 2, 180);
-    bounds.strokeCircle(w / 2, h / 2, 40);
+    this.mapGraphics.lineStyle(2, 0x00ccff, 0.7);
+    this.mapGraphics.lineBetween(40, 470, 1560, 470);
+    this.mapGraphics.lineBetween(40, 590, 1560, 590);
 
-    this.arenaContainer.add(bounds);
+    // River Floating Label
+    const riverLabel = this.add.text(220, 530, '🌊 CYBER RIVER (SLOW)', {
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+      fontStyle: 'bold',
+      color: '#00CCFF',
+      letterSpacing: 2
+    }).setOrigin(0.5).setAlpha(0.85);
+    this.labelsContainer.add(riverLabel);
+
+    // 3. Draw 3 Bridges Crossing River
+    for (const bridge of mapData.bridges) {
+      // Bridge Deck Fill
+      this.mapGraphics.fillStyle(0x161633, 0.95);
+      this.mapGraphics.fillRoundedRect(bridge.x, bridge.y, bridge.width, bridge.height, 6);
+
+      // Bridge Glowing Rails
+      this.mapGraphics.lineStyle(3, bridge.colorNum, 0.9);
+      this.mapGraphics.strokeRoundedRect(bridge.x, bridge.y, bridge.width, bridge.height, 6);
+
+      // Bridge Plank Lines
+      this.mapGraphics.lineStyle(1, 0xffffff, 0.3);
+      for (let py = bridge.y + 16; py < bridge.y + bridge.height - 10; py += 18) {
+        this.mapGraphics.lineBetween(bridge.x + 4, py, bridge.x + bridge.width - 4, py);
+      }
+
+      const bridgeText = this.add.text(bridge.x + bridge.width / 2, bridge.y + bridge.height / 2, 'BRIDGE', {
+        fontFamily: 'monospace',
+        fontSize: '10px',
+        fontStyle: 'bold',
+        color: '#FFFFFF'
+      }).setOrigin(0.5);
+      this.labelsContainer.add(bridgeText);
+    }
+
+    // 4. Draw Start Plaza Center Circle & Rings
+    this.mapGraphics.lineStyle(2, 0x00F0FF, 0.6);
+    this.mapGraphics.strokeCircle(800, 530, 90);
+    this.mapGraphics.strokeCircle(800, 530, 24);
+    this.mapGraphics.fillStyle(0x00F0FF, 0.08);
+    this.mapGraphics.fillCircle(800, 530, 90);
+
+    const plazaLabel = this.add.text(800, 530, 'START PLAZA', {
+      fontFamily: 'sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#00F0FF',
+      letterSpacing: 2
+    }).setOrigin(0.5);
+    this.labelsContainer.add(plazaLabel);
+
+    // 5. Draw Static Obstacle Walls
+    for (const wall of mapData.walls) {
+      const color = wall.colorNum || 0x00F0FF;
+      if (wall.type === 'boundary') {
+        this.wallsGraphics.fillStyle(0x00F0FF, 0.8);
+        this.wallsGraphics.fillRect(wall.x, wall.y, wall.width, wall.height);
+      } else if (wall.type === 'forest') {
+        this.wallsGraphics.fillStyle(0x0e2418, 0.85);
+        this.wallsGraphics.fillRoundedRect(wall.x, wall.y, wall.width, wall.height, 8);
+        this.wallsGraphics.lineStyle(2, color, 0.8);
+        this.wallsGraphics.strokeRoundedRect(wall.x, wall.y, wall.width, wall.height, 8);
+      } else if (wall.type === 'castle') {
+        this.wallsGraphics.fillStyle(0x101830, 0.9);
+        this.wallsGraphics.fillRect(wall.x, wall.y, wall.width, wall.height);
+        this.wallsGraphics.lineStyle(2, color, 0.9);
+        this.wallsGraphics.strokeRect(wall.x, wall.y, wall.width, wall.height);
+      } else if (wall.type === 'cave') {
+        this.wallsGraphics.fillStyle(0x220a30, 0.9);
+        this.wallsGraphics.fillRect(wall.x, wall.y, wall.width, wall.height);
+        this.wallsGraphics.lineStyle(2, color, 0.9);
+        this.wallsGraphics.strokeRect(wall.x, wall.y, wall.width, wall.height);
+      } else if (wall.type === 'secret_door') {
+        if (!mapData.secretDoorOpen) {
+          this.wallsGraphics.fillStyle(0xff0055, 0.9);
+          this.wallsGraphics.fillRect(wall.x, wall.y, wall.width, wall.height);
+          this.wallsGraphics.lineStyle(2, 0xffffff, 0.9);
+          this.wallsGraphics.strokeRect(wall.x, wall.y, wall.width, wall.height);
+        }
+      } else {
+        // Ruins / Other
+        this.wallsGraphics.fillStyle(0x1e1528, 0.9);
+        this.wallsGraphics.fillRoundedRect(wall.x, wall.y, wall.width, wall.height, 4);
+        this.wallsGraphics.lineStyle(2, color, 0.8);
+        this.wallsGraphics.strokeRoundedRect(wall.x, wall.y, wall.width, wall.height, 4);
+      }
+    }
+
+    // 6. Match Seed Badge (Bottom Right)
+    const seedText = this.add.text(WORLD_WIDTH - 30, WORLD_HEIGHT - 24, `MATCH SEED: #${currentGameState.seed || '000000'} | [M] POI Markers`, {
+      fontFamily: 'monospace',
+      fontSize: '12px',
+      color: '#00F0FF'
+    }).setOrigin(1, 0.5);
+    this.labelsContainer.add(seedText);
+  }
+
+  // Render Seeded Match POI Debug Markers (Toggleable with 'M')
+  renderPoiMarkers() {
+    this.poiDebugContainer.removeAll(true);
+    const mapData = currentGameState.map;
+    if (!mapData || !mapData.pois) return;
+
+    const pois = mapData.pois;
+    const g = this.add.graphics();
+
+    // 1. Treasures (Gold Diamonds)
+    for (const t of (pois.treasures || [])) {
+      g.fillStyle(0xFFD700, 0.9);
+      g.fillCircle(t.x, t.y, 8);
+      g.lineStyle(1.5, 0xFFFFFF, 1);
+      g.strokeCircle(t.x, t.y, 8);
+
+      const label = this.add.text(t.x, t.y, 'T', {
+        fontFamily: 'sans-serif',
+        fontSize: '9px',
+        fontStyle: 'bold',
+        color: '#000000'
+      }).setOrigin(0.5);
+      this.poiDebugContainer.add(label);
+    }
+
+    // 2. Vaults (Bronze Squares)
+    for (const v of (pois.vaults || [])) {
+      g.fillStyle(0xFF8800, 0.95);
+      g.fillRect(v.x - 14, v.y - 14, 28, 28);
+      g.lineStyle(2, 0xFFFFFF, 1);
+      g.strokeRect(v.x - 14, v.y - 14, 28, 28);
+
+      const label = this.add.text(v.x, v.y, 'VAULT', {
+        fontFamily: 'monospace',
+        fontSize: '7px',
+        fontStyle: 'bold',
+        color: '#FFFFFF'
+      }).setOrigin(0.5);
+      this.poiDebugContainer.add(label);
+    }
+
+    // 3. Clues (Cyan Rings)
+    for (const c of (pois.clues || [])) {
+      g.lineStyle(2, 0x00FFFF, 0.9);
+      g.strokeCircle(c.x, c.y, 10);
+      g.fillStyle(0x00FFFF, 0.5);
+      g.fillCircle(c.x, c.y, 5);
+
+      const label = this.add.text(c.x, c.y - 16, 'CLUE', {
+        fontFamily: 'sans-serif',
+        fontSize: '8px',
+        fontStyle: 'bold',
+        color: '#00FFFF'
+      }).setOrigin(0.5);
+      this.poiDebugContainer.add(label);
+    }
+
+    // 4. Mission Zones (Neon Orange Circles)
+    for (const m of (pois.missions || [])) {
+      g.lineStyle(2, 0xFF5500, 0.8);
+      g.strokeCircle(m.x, m.y, 28);
+      g.fillStyle(0xFF5500, 0.15);
+      g.fillCircle(m.x, m.y, 28);
+
+      const label = this.add.text(m.x, m.y, m.label || 'MISSION', {
+        fontFamily: 'sans-serif',
+        fontSize: '8px',
+        fontStyle: 'bold',
+        color: '#FF5500'
+      }).setOrigin(0.5);
+      this.poiDebugContainer.add(label);
+    }
+
+    // 5. Secret Switch (Red Button Marker)
+    if (pois.secretSwitch) {
+      const sw = pois.secretSwitch;
+      g.fillStyle(0xFF0055, 1);
+      g.fillCircle(sw.x, sw.y, 10);
+      g.lineStyle(2, 0xFFFFFF, 1);
+      g.strokeCircle(sw.x, sw.y, 10);
+
+      const label = this.add.text(sw.x, sw.y - 16, 'SWITCH', {
+        fontFamily: 'monospace',
+        fontSize: '8px',
+        fontStyle: 'bold',
+        color: '#FF0055'
+      }).setOrigin(0.5);
+      this.poiDebugContainer.add(label);
+    }
+
+    // 6. Portals (Swirling Rings)
+    for (const pair of (pois.portals || [])) {
+      [pair.a, pair.b].forEach((portal, idx) => {
+        g.lineStyle(3, portal.colorNum || 0x00F0FF, 0.9);
+        g.strokeCircle(portal.x, portal.y, 14);
+        g.fillStyle(portal.colorNum || 0x00F0FF, 0.3);
+        g.fillCircle(portal.x, portal.y, 8);
+
+        const label = this.add.text(portal.x, portal.y - 18, `PORTAL ${idx === 0 ? 'A' : 'B'}`, {
+          fontFamily: 'sans-serif',
+          fontSize: '8px',
+          fontStyle: 'bold',
+          color: '#00F0FF'
+        }).setOrigin(0.5);
+        this.poiDebugContainer.add(label);
+      });
+    }
+
+    // 7. Merchants (Green Kiosks)
+    for (const merc of (pois.merchants || [])) {
+      g.fillStyle(0x39FF14, 0.9);
+      g.fillRoundedRect(merc.x - 12, merc.y - 12, 24, 24, 4);
+      g.lineStyle(2, 0x050510, 1);
+      g.strokeRoundedRect(merc.x - 12, merc.y - 12, 24, 24, 4);
+
+      const label = this.add.text(merc.x, merc.y - 16, merc.name, {
+        fontFamily: 'sans-serif',
+        fontSize: '8px',
+        fontStyle: 'bold',
+        color: '#39FF14'
+      }).setOrigin(0.5);
+      this.poiDebugContainer.add(label);
+    }
+
+    this.poiDebugContainer.add(g);
+    this.poiDebugContainer.setDepth(5);
   }
 
   renderLobbyUI() {
@@ -231,13 +490,12 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.lobbyContainer.add(scanHeader);
 
-    // QR Backing plate for high contrast
+    // High Contrast White Plate
     const qrPlate = this.add.graphics();
     qrPlate.fillStyle(0xFFFFFF, 1);
     qrPlate.fillRoundedRect(leftX - 125, leftY - 170, 250, 250, 12);
     this.lobbyContainer.add(qrPlate);
 
-    // QR Image Sprite
     if (this.textures.exists('qrcode')) {
       const qrSprite = this.add.image(leftX, leftY - 45, 'qrcode');
       qrSprite.setDisplaySize(240, 240);
@@ -383,7 +641,7 @@ class HostScene extends Phaser.Scene {
   }
 
   createPlayerEntity(p) {
-    const container = this.add.container(p.x || WORLD_WIDTH / 2, p.y || WORLD_HEIGHT / 2);
+    const container = this.add.container(p.x || 800, p.y || 530);
     const radius = 24;
 
     const glow = this.add.graphics();
@@ -423,10 +681,10 @@ class HostScene extends Phaser.Scene {
       glow,
       ring,
       labelText: nameTag,
-      targetX: p.x || WORLD_WIDTH / 2,
-      targetY: p.y || WORLD_HEIGHT / 2,
-      currentX: p.x || WORLD_WIDTH / 2,
-      currentY: p.y || WORLD_HEIGHT / 2,
+      targetX: p.x || 800,
+      targetY: p.y || 530,
+      currentX: p.x || 800,
+      currentY: p.y || 530,
       action: false,
       color: p.color
     });
@@ -455,9 +713,9 @@ class HostScene extends Phaser.Scene {
   setupDebugOverlay() {
     this.debugBg = this.add.graphics();
     this.debugBg.fillStyle(0x050515, 0.85);
-    this.debugBg.fillRoundedRect(0, 0, 280, 130, 8);
+    this.debugBg.fillRoundedRect(0, 0, 280, 150, 8);
     this.debugBg.lineStyle(1, 0x00F0FF, 0.8);
-    this.debugBg.strokeRoundedRect(0, 0, 280, 130, 8);
+    this.debugBg.strokeRoundedRect(0, 0, 280, 150, 8);
 
     this.debugText = this.add.text(14, 14, '', {
       fontFamily: 'monospace',
@@ -495,7 +753,8 @@ class HostScene extends Phaser.Scene {
         `Racers       : ${currentGameState.playerCount}/20\n` +
         `Server Tick  : ${serverTickTimeMs} ms\n` +
         `Snapshot Size: ${snapshotBytes} bytes\n` +
-        `State        : ${currentGameState.state}`
+        `Match Seed   : #${currentGameState.seed || 0}\n` +
+        `POI Overlay  : [M] ${showPoiDebugMarkers ? 'ON' : 'OFF'}`
       );
     }
   }

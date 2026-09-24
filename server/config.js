@@ -4,12 +4,12 @@ export const CONFIG = {
   // Network & Server
   PORT: process.env.PORT || 3000,
   HOST: '0.0.0.0',
-  PUBLIC_URL: process.env.PUBLIC_URL || '', // Optional explicit domain (e.g. https://anomaly.onrender.com)
+  PUBLIC_URL: process.env.PUBLIC_URL || '',
   TICK_RATE: 20, // 20 ticks per second
   TICK_INTERVAL_MS: 1000 / 20, // 50ms per tick
   INPUT_HEARTBEAT_MS: 250, // 250ms heartbeat for controller inputs
 
-  // World Map Dimensions (Host canvas maps to this resolution)
+  // World Map Dimensions (1600x1000)
   WORLD: {
     WIDTH: 1600,
     HEIGHT: 1000
@@ -20,7 +20,9 @@ export const CONFIG = {
     MAX_SPEED: 420, // Maximum pixels per second
     ACCELERATION: 1600, // Pixels per second squared
     FRICTION: 0.85, // Velocity damping factor per tick (0 = full stop, 1 = ice)
-    PLAYER_RADIUS: 24 // Collision & render radius
+    PLAYER_RADIUS: 24, // Collision & render radius
+    RIVER_SPEED_MULTIPLIER: 0.55, // Speed multiplier when wading in water without bridge (0.55 = 45% slower)
+    PLAYER_PUSH_FORCE: 0.5 // Soft body-blocking push factor between players (0.0 to 1.0)
   },
 
   // Player Settings
@@ -28,7 +30,24 @@ export const CONFIG = {
   MIN_PLAYERS_TO_START: 1,
   MAX_NAME_LENGTH: 12,
 
-  // Player Neon Palette (Hex strings and numerical values for Phaser)
+  // Start Plaza Spawn (Center of map)
+  SPAWN_PLAZA: {
+    X: 800,
+    Y: 530,
+    RADIUS: 90
+  },
+
+  // Seeded POI Counts Per Match
+  POI_COUNTS: {
+    TREASURES: 12,
+    VAULTS: 2,
+    CLUES: 5,
+    MISSIONS: 3,
+    PORTAL_PAIRS: 1,
+    MERCHANTS: 2
+  },
+
+  // Player Neon Palette
   PLAYER_COLORS: [
     { hex: '#00F0FF', num: 0x00f0ff, name: 'Cyber Cyan' },
     { hex: '#39FF14', num: 0x39ff14, name: 'Neon Lime' },
