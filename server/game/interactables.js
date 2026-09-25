@@ -413,6 +413,10 @@ export class InteractableManager {
         ent.respawnAt = now + CONFIG.SCORING.TREASURE_RESPAWN_MS;
         this.scoring.awardPoints(player, ent.points, `${ent.tier.toUpperCase()} TREASURE`, { x: ent.x, y: ent.y });
         
+        if (this.gameManager.statsTracker) {
+          this.gameManager.statsTracker.recordTreasure(player, ent.tier, false);
+        }
+
         // Notify Mission System
         if (this.gameManager.missions) {
           this.gameManager.missions.onPlayerEvent(player, 'TREASURE_COLLECT', { tier: ent.tier, isGlitch: false });
@@ -423,6 +427,10 @@ export class InteractableManager {
         ent.state = 'collected';
         this.scoring.awardPoints(player, ent.points, 'GLITCH TREASURE', { x: ent.x, y: ent.y });
         
+        if (this.gameManager.statsTracker) {
+          this.gameManager.statsTracker.recordTreasure(player, 'glitch', true);
+        }
+
         // Notify Mission System (Opportunist)
         if (this.gameManager.missions) {
           this.gameManager.missions.onPlayerEvent(player, 'TREASURE_COLLECT', { tier: 'glitch', isGlitch: true });
@@ -448,6 +456,10 @@ export class InteractableManager {
             ent.holdingPlayers.clear();
             const reward = this.rng.rangeInt(CONFIG.SCORING.CHEST_MIN, CONFIG.SCORING.CHEST_MAX);
             this.scoring.awardPoints(player, reward, 'SECRET CHEST', { x: ent.x, y: ent.y });
+
+            if (this.gameManager.statsTracker) {
+              this.gameManager.statsTracker.recordChest(player);
+            }
 
             // Notify Mission System (Collector)
             if (this.gameManager.missions) {
@@ -477,6 +489,10 @@ export class InteractableManager {
           player.hasKey = false;
           this.scoring.awardPoints(player, CONFIG.SCORING.VAULT, 'VAULT UNLOCKED', { x: ent.x, y: ent.y });
 
+          if (this.gameManager.statsTracker) {
+            this.gameManager.statsTracker.recordVault(player);
+          }
+
           this.gameManager.io.emit('host_event', {
             id: Math.random().toString(36).substring(2, 9),
             type: 'vault_opened',
@@ -495,6 +511,10 @@ export class InteractableManager {
           player.vy = 0;
           player.portalCooldownUntil = now + (CONFIG.SCORING.PORTAL_COOLDOWN_SEC * 1000);
           this.scoring.awardPoints(player, 5, 'PORTAL WARP', { x: player.x, y: player.y });
+
+          if (this.gameManager.statsTracker) {
+            this.gameManager.statsTracker.recordPortal(player);
+          }
 
           // Notify Mission System (Portal Jumper)
           if (this.gameManager.missions) {

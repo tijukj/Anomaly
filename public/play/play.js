@@ -530,6 +530,15 @@ socket.on('player_hud', (data) => {
   }
 });
 
+// Socket Event: Final 10-Second Countdown (Vibration & Alert)
+socket.on('final_countdown_tick', (data) => {
+  triggerHaptic(100);
+  if (hudTimer) {
+    hudTimer.textContent = `00:${data.count.toString().padStart(2, '0')}`;
+    hudTimer.style.color = data.count <= 3 ? '#FF0055' : '#FFE600';
+  }
+});
+
 // Socket Event: Match Ended (Podium & Final Result)
 socket.on('match_ended', (data) => {
   currentGameState = 'ENDED';
@@ -538,13 +547,65 @@ socket.on('match_ended', (data) => {
   if (localPlayer && data && data.leaderboard) {
     const myEntry = data.leaderboard.find(p => p.id === localPlayer.id);
     if (myEntry) {
-      if (endedRank) endedRank.textContent = `#${myEntry.rank}`;
+      const medal = myEntry.rank === 1 ? ' 👑' : (myEntry.rank === 2 ? ' 🥈' : (myEntry.rank === 3 ? ' 🥉' : ''));
+      if (endedRank) endedRank.textContent = `#${myEntry.rank}${medal}`;
       if (endedScore) endedScore.textContent = `${myEntry.score} PTS`;
+
+      // Update mini stats
+      if (myEntry.stats) {
+        const st = myEntry.stats;
+        const statTreasures = document.getElementById('stat-treasures');
+        const statChests = document.getElementById('stat-chests');
+        const statVaults = document.getElementById('stat-vaults');
+        const statDistance = document.getElementById('stat-distance');
+
+        if (statTreasures) statTreasures.textContent = `${st.totalTreasures || 0}`;
+        if (statChests) statChests.textContent = `${st.chestsOpened || 0}`;
+        if (statVaults) statVaults.textContent = `${st.vaultsOpened || 0}`;
+        if (statDistance) statDistance.textContent = `${st.distanceMeters || 0}m`;
+      }
+    }
+
+    // Check if local player won any special award
+    const awardsBadge = document.getElementById('ended-awards-badge');
+    const awardsText = document.getElementById('ended-awards-text');
+    if (awardsBadge && awardsText && data.awards) {
+      const myWonAwards = Object.values(data.awards).filter(a => a && a.recipientId === localPlayer.id);
+      if (myWonAwards.length > 0) {
+        const firstAward = myWonAwards[0];
+        awardsText.textContent = `${firstAward.icon} ${firstAward.title} AWARD WINNER!`;
+        awardsBadge.classList.remove('hidden');
+      } else {
+        awardsBadge.classList.add('hidden');
+      }
+    }
+
+    // Populate Top 3 Podium Summary
+    const podiumContainer = document.getElementById('ended-podium-summary');
+    if (podiumContainer && data.podium) {
+      podiumContainer.innerHTML = '';
+      data.podium.forEach(p => {
+        const row = document.createElement('div');
+        row.className = 'podium-summary-row';
+        const medal = p.rank === 1 ? '🥇 1ST' : (p.rank === 2 ? '🥈 2ND' : '🥉 3RD');
+        row.innerHTML = `
+          <span class="podium-summary-rank">${medal}</span>
+          <span class="podium-summary-name" style="color:${(p.color && p.color.hex) || '#fff'}">${p.name}</span>
+          <span class="podium-summary-score">${p.score} PTS</span>
+        `;
+        podiumContainer.appendChild(row);
+      });
+    }
+
+    // Haptic celebration: Longer fanfare for top 3
+    if (myEntry && myEntry.rank <= 3) {
+      triggerHaptic([200, 80, 200, 80, 400]);
+    } else {
+      triggerHaptic(200);
     }
   }
 
   showView('ended');
-  triggerHaptic(200);
 });
 
 // Socket Event: Global Game State Updates

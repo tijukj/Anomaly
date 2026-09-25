@@ -164,6 +164,10 @@ export class ClueManager {
         // Award points to discoverer
         this.scoring.awardPoints(player, CONFIG.SCORING.CLUE_DISCOVERY, `DISCOVERED CLUE #${step}`, { x: ent.x, y: ent.y });
 
+        if (this.gameManager.statsTracker) {
+          this.gameManager.statsTracker.recordClue(player, step);
+        }
+
         // Record in public known clues
         const clueRecord = {
           step,
@@ -216,6 +220,10 @@ export class ClueManager {
         sc.discoveredBy = player.name;
         this.scoring.awardPoints(player, sc.reward || CONFIG.SCORING.SIDE_CLUE_BONUS, `SIDE CLUE: ${sc.title}`, { x: ent.x, y: ent.y });
 
+        if (this.gameManager.statsTracker) {
+          this.gameManager.statsTracker.recordSideClue(player);
+        }
+
         this.gameManager.io.emit('host_event', {
           id: Math.random().toString(36).substring(2, 9),
           type: 'side_clue',
@@ -240,6 +248,10 @@ export class ClueManager {
           'LEGENDARY TREASURE FOUND',
           { x: ent.x, y: ent.y }
         );
+
+        if (this.gameManager.statsTracker) {
+          this.gameManager.statsTracker.recordLegendaryTreasure(player);
+        }
 
         console.log(`[ClueManager] 👑👑 LEGENDARY TREASURE FOUND BY ${player.name}! (+${CONFIG.LEGENDARY.POINTS} PTS)`);
 

@@ -367,6 +367,10 @@ export class AnomalyManager {
         // Update stats
         const currentSeconds = this.stats.crownHoldTimes.get(holder.id) || 0;
         this.stats.crownHoldTimes.set(holder.id, currentSeconds + 2);
+
+        if (this.gameManager && this.gameManager.statsTracker) {
+          this.gameManager.statsTracker.recordCrownHold(holder, 2);
+        }
       }
 
       // Check for tag / steal by another player
@@ -381,6 +385,9 @@ export class AnomalyManager {
             this.crownState.stealProtectionUntil = now + (CONFIG.ANOMALIES.CROWN_STEAL_PROTECTION_SEC * 1000);
 
             this.scoring.awardPoints(p, 15, 'STOLE THE CROWN!', { x: p.x, y: p.y });
+            if (this.gameManager && this.gameManager.statsTracker) {
+              this.gameManager.statsTracker.recordAnomalyAction(p, 5);
+            }
             this.gameManager.io.emit('host_event', {
               id: Math.random().toString(36).substring(2, 9),
               type: 'crown_stolen',

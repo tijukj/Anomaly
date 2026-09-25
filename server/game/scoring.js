@@ -36,6 +36,10 @@ export class ScoringSystem {
 
     player.score = (player.score || 0) + finalAmount;
 
+    if (this.gameManager && this.gameManager.statsTracker) {
+      this.gameManager.statsTracker.recordScoreChange(player, finalAmount);
+    }
+
     const event = {
       id: Math.random().toString(36).substring(2, 9),
       playerId: player.id,

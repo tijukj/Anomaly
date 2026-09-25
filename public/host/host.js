@@ -214,6 +214,56 @@ class SoundEngine {
     } catch (e) {}
   }
 
+  playFinalCountdownBeep(count = 10) {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    try {
+      const t = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = count === 1 ? 'sine' : 'triangle';
+      const baseFreq = 480 + (10 - count) * 60;
+      const dur = count <= 3 ? 0.28 : 0.16;
+
+      osc.frequency.setValueAtTime(baseFreq, t);
+      if (count <= 3) {
+        osc.frequency.linearRampToValueAtTime(baseFreq * 1.3, t + dur);
+      }
+
+      gain.gain.setValueAtTime(0.24, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(t);
+      osc.stop(t + dur);
+    } catch (e) {}
+  }
+
+  playHighlightChime() {
+    if (this.muted || !this.ctx) return;
+    this.resume();
+    try {
+      const freqs = [587.33, 739.99, 880, 1174.66];
+      freqs.forEach((freq, idx) => {
+        const t = this.ctx.currentTime + idx * 0.06;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.18, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.28);
+      });
+    } catch (e) {}
+  }
+
   playClue() {
     if (this.muted || !this.ctx) return;
     this.resume();
@@ -591,9 +641,16 @@ class HostScene extends Phaser.Scene {
       sounds.playAnomaly();
     });
 
+    // Socket Event: Final 10-Second Countdown Tick
+    socket.on('final_countdown_tick', (data) => {
+      sounds.playFinalCountdownBeep(data.count);
+      this.showFinalCountdownOverlay(data.count);
+    });
+
     // Socket Event: Match Ended
     socket.on('match_ended', (data) => {
-      this.renderEndedScreen(data.leaderboard, data.podium);
+      currentGameState.state = 'ENDED';
+      this.renderEndedScreen(data);
       sounds.playLegendaryFanfare();
     });
 
@@ -1657,97 +1714,545 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Render Final Match Results / Podium Screen
-  renderEndedScreen(leaderboard = [], podium = []) {
-    this.endedContainer.removeAll(true);
-    if (currentGameState.state !== 'ENDED') return;
+  // Show Final 10-Second Countdown Overlay (Large Numbers & Ticks)
+  showFinalCountdownOverlay(count) {
+    if (currentGameState.state !== 'RUNNING') return;
+    this.countdownContainer.removeAll(true);
+
+    const cx = 1100;
+    const cy = 280;
 
     const bg = this.add.graphics();
-    bg.fillStyle(0x050512, 0.94);
+    bg.fillStyle(0x050512, 0.82);
+    bg.fillCircle(cx, cy, 95);
+    const borderColor = count <= 3 ? 0xFF0055 : (count <= 5 ? 0xFFAA00 : 0x00F0FF);
+    bg.lineStyle(4, borderColor, 0.95);
+    bg.strokeCircle(cx, cy, 95);
+
+    const countText = this.add.text(cx, cy - 8, `${count}`, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '84px',
+      color: count <= 3 ? '#FF0055' : (count <= 5 ? '#FFAA00' : '#00F0FF'),
+      stroke: '#FFFFFF',
+      strokeThickness: 3
+    }).setOrigin(0.5);
+
+    const subText = this.add.text(cx, cy + 50, 'FINAL SECONDS', {
+      fontFamily: 'sans-serif',
+      fontSize: '11px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      letterSpacing: 2
+    }).setOrigin(0.5);
+
+    this.countdownContainer.add([bg, countText, subText]);
+    this.countdownContainer.setDepth(150);
+
+    this.tweens.add({
+      targets: [bg, countText],
+      scaleX: 1.18,
+      scaleY: 1.18,
+      duration: 320,
+      yoyo: true,
+      ease: 'Cubic.easeInOut'
+    });
+  }
+
+  // Phase 10: Match Ended Screen Entry Point
+  renderEndedScreen(resultsData = {}) {
+    this.endedContainer.removeAll(true);
+    this.countdownContainer.removeAll(true);
+    if (currentGameState.state !== 'ENDED') return;
+
+    this.matchResults = resultsData;
+    this.hasSkippedHighlights = false;
+
+    const cards = resultsData.highlightCards || [];
+    if (cards.length > 0) {
+      this.startHighlightReel(resultsData);
+    } else {
+      this.renderPodiumAndAwards(resultsData);
+    }
+  }
+
+  // 1. Highlight Reel Carousel: 4-6 Stat Cards (~3 seconds each)
+  startHighlightReel(resultsData) {
+    if (this.highlightTimer) {
+      this.highlightTimer.remove();
+      this.highlightTimer = null;
+    }
+
+    this.endedContainer.removeAll(true);
+    this.endedContainer.setDepth(200);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x050512, 0.96);
     bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.endedContainer.add(bg);
 
-    const title = this.add.text(1100, 80, '🏆 MATCH COMPLETED 🏆', {
+    const cards = resultsData.highlightCards || [];
+    let currentIndex = 0;
+
+    const reelCardContainer = this.add.container(0, 0);
+    this.endedContainer.add(reelCardContainer);
+
+    const renderCard = (index) => {
+      reelCardContainer.removeAll(true);
+      const card = cards[index];
+      if (!card) return;
+
+      sounds.playHighlightChime();
+
+      const cx = 1100;
+      const cy = 460;
+      const cardW = 860;
+      const cardH = 460;
+      const accentNum = Phaser.Display.Color.HexStringToColor(card.accentColor || '#00F0FF').color;
+
+      // Card Background with Glowing Cyber Border
+      const cardGfx = this.add.graphics();
+      cardGfx.fillStyle(0x0d0d26, 0.95);
+      cardGfx.fillRoundedRect(cx - cardW / 2, cy - cardH / 2, cardW, cardH, 20);
+      cardGfx.lineStyle(3, accentNum, 0.9);
+      cardGfx.strokeRoundedRect(cx - cardW / 2, cy - cardH / 2, cardW, cardH, 20);
+      reelCardContainer.add(cardGfx);
+
+      // Category Badge Pill
+      const badgePill = this.add.graphics();
+      badgePill.fillStyle(accentNum, 0.2);
+      badgePill.fillRoundedRect(cx - 160, cy - cardH / 2 + 30, 320, 36, 18);
+      badgePill.lineStyle(2, accentNum, 0.8);
+      badgePill.strokeRoundedRect(cx - 160, cy - cardH / 2 + 30, 320, 36, 18);
+      reelCardContainer.add(badgePill);
+
+      const badgeText = this.add.text(cx, cy - cardH / 2 + 48, (card.badge || 'MATCH HIGHLIGHT').toUpperCase(), {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
+        fontSize: '16px',
+        color: card.accentColor || '#00F0FF',
+        letterSpacing: 3
+      }).setOrigin(0.5);
+      reelCardContainer.add(badgeText);
+
+      // Big Icon Orb
+      const iconOrb = this.add.graphics();
+      iconOrb.fillStyle(0x18183c, 1);
+      iconOrb.fillCircle(cx, cy - 65, 50);
+      iconOrb.lineStyle(3, accentNum, 1);
+      iconOrb.strokeCircle(cx, cy - 65, 50);
+      reelCardContainer.add(iconOrb);
+
+      const iconText = this.add.text(cx, cy - 65, card.icon || '⭐', {
+        fontSize: '48px'
+      }).setOrigin(0.5);
+      reelCardContainer.add(iconText);
+
+      // Headline Text
+      const headline = this.add.text(cx, cy + 40, card.title || 'INCREDIBLE FEAT', {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
+        fontSize: '34px',
+        color: '#FFFFFF',
+        letterSpacing: 2,
+        align: 'center',
+        wordWrap: { width: cardW - 80 }
+      }).setOrigin(0.5);
+      reelCardContainer.add(headline);
+
+      // Subtitle Text
+      const sub = this.add.text(cx, cy + 95, card.subtitle || '', {
+        fontFamily: 'sans-serif',
+        fontSize: '18px',
+        color: '#8888CC',
+        letterSpacing: 1,
+        align: 'center',
+        wordWrap: { width: cardW - 100 }
+      }).setOrigin(0.5);
+      reelCardContainer.add(sub);
+
+      // Player Pill
+      if (card.playerName) {
+        const pCol = card.colorHex || '#00F0FF';
+        const pColNum = Phaser.Display.Color.HexStringToColor(pCol).color;
+        const playerBadge = this.add.graphics();
+        playerBadge.fillStyle(0x050515, 0.9);
+        playerBadge.fillRoundedRect(cx - 130, cy + 140, 260, 40, 20);
+        playerBadge.lineStyle(2, pColNum, 0.9);
+        playerBadge.strokeRoundedRect(cx - 130, cy + 140, 260, 40, 20);
+        playerBadge.fillStyle(pColNum, 1);
+        playerBadge.fillCircle(cx - 95, cy + 160, 10);
+        reelCardContainer.add(playerBadge);
+
+        const pName = this.add.text(cx - 75, cy + 160, card.playerName, {
+          fontFamily: 'sans-serif',
+          fontSize: '16px',
+          fontStyle: 'bold',
+          color: '#FFFFFF'
+        }).setOrigin(0, 0.5);
+        reelCardContainer.add(pName);
+      }
+
+      // Progress Line Indicator
+      const lineY = cy + cardH / 2 - 16;
+      const lineW = cardW - 80;
+      const progressBg = this.add.graphics();
+      progressBg.fillStyle(0x222244, 0.6);
+      progressBg.fillRoundedRect(cx - lineW / 2, lineY, lineW, 6, 3);
+      reelCardContainer.add(progressBg);
+
+      const progressBar = this.add.graphics();
+      progressBar.fillStyle(accentNum, 1);
+      progressBar.fillRoundedRect(cx - lineW / 2, lineY, 0, 6, 3);
+      reelCardContainer.add(progressBar);
+
+      this.tweens.add({
+        targets: { w: 0 },
+        w: lineW,
+        duration: 3200,
+        ease: 'Linear',
+        onUpdate: (tween) => {
+          const val = tween.getValue();
+          progressBar.clear();
+          progressBar.fillStyle(accentNum, 1);
+          progressBar.fillRoundedRect(cx - lineW / 2, lineY, val, 6, 3);
+        }
+      });
+
+      // Card Dots & Counter (e.g. Highlight 1 of 5)
+      const dotStartX = cx - ((cards.length - 1) * 24) / 2;
+      for (let i = 0; i < cards.length; i++) {
+        const dot = this.add.graphics();
+        dot.fillStyle(i === index ? accentNum : 0x444466, 1);
+        dot.fillCircle(dotStartX + i * 24, cy + cardH / 2 + 30, i === index ? 6 : 4);
+        reelCardContainer.add(dot);
+      }
+
+      const counterText = this.add.text(cx, cy + cardH / 2 + 55, `HIGHLIGHT ${index + 1} OF ${cards.length}`, {
+        fontFamily: 'sans-serif',
+        fontSize: '13px',
+        fontStyle: 'bold',
+        color: '#666699',
+        letterSpacing: 2
+      }).setOrigin(0.5);
+      reelCardContainer.add(counterText);
+
+      // Intro Animation
+      reelCardContainer.setAlpha(0);
+      reelCardContainer.setScale(0.92);
+      this.tweens.add({
+        targets: reelCardContainer,
+        alpha: 1,
+        scaleX: 1,
+        scaleY: 1,
+        duration: 350,
+        ease: 'Back.easeOut'
+      });
+    };
+
+    // Header Title
+    const headerTitle = this.add.text(1100, 95, '⚡ MATCH HIGHLIGHTS ⚡', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: '56px',
+      fontSize: '48px',
+      color: '#00F0FF',
+      letterSpacing: 8,
+      stroke: '#000000',
+      strokeThickness: 4
+    }).setOrigin(0.5);
+
+    const headerSub = this.add.text(1100, 145, 'RELIVING EPIC MOMENTS ACROSS THE ARENA', {
+      fontFamily: 'sans-serif',
+      fontSize: '15px',
+      color: '#8888AA',
+      letterSpacing: 4
+    }).setOrigin(0.5);
+    this.endedContainer.add([headerTitle, headerSub]);
+
+    // Skip to Podium Button
+    const skipY = WORLD_HEIGHT - 65;
+    const skipBtn = this.add.text(1100, skipY, '[ SKIP TO FINAL PODIUM (CLICK / PRESS SPACE) ]', {
+      fontFamily: 'sans-serif',
+      fontSize: '14px',
+      fontStyle: 'bold',
+      color: '#39FF14',
+      backgroundColor: 'rgba(5, 5, 20, 0.8)',
+      padding: { x: 16, y: 8 }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    skipBtn.on('pointerdown', () => {
+      this.hasSkippedHighlights = true;
+      if (this.highlightTimer) this.highlightTimer.remove();
+      this.renderPodiumAndAwards(resultsData);
+    });
+    this.endedContainer.add(skipBtn);
+
+    renderCard(0);
+
+    // Schedule next cards
+    const scheduleNext = () => {
+      this.highlightTimer = this.time.delayedCall(3200, () => {
+        currentIndex++;
+        if (currentIndex < cards.length) {
+          renderCard(currentIndex);
+          scheduleNext();
+        } else {
+          this.renderPodiumAndAwards(resultsData);
+        }
+      });
+    };
+    scheduleNext();
+  }
+
+  // 2. Final Podium (Top 3) + Special Awards + Full Ranking Screen
+  renderPodiumAndAwards(resultsData) {
+    if (this.highlightTimer) {
+      this.highlightTimer.remove();
+      this.highlightTimer = null;
+    }
+
+    this.endedContainer.removeAll(true);
+    this.endedContainer.setDepth(200);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x050512, 0.96);
+    bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.endedContainer.add(bg);
+
+    // Top Ceremony Header
+    const title = this.add.text(1100, 55, '🏆 FINAL PODIUM CEREMONY 🏆', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '46px',
       color: '#FFE600',
       letterSpacing: 6,
       stroke: '#000000',
       strokeThickness: 4
     }).setOrigin(0.5);
-    this.endedContainer.add(title);
 
-    const podiumX = [1100, 880, 1320];
-    const podiumH = [200, 150, 120];
-    const podiumColors = [0xFFD700, 0xC0C0C0, 0xCD7F32];
-    const ranks = ['1ST PLACE 👑', '2ND PLACE 🥈', '3RD PLACE 🥉'];
+    const sub = this.add.text(1100, 95, 'OFFICIAL MATCH RANKINGS & SPECIAL MERIT AWARDS', {
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+      color: '#8888BB',
+      letterSpacing: 3
+    }).setOrigin(0.5);
+    this.endedContainer.add([title, sub]);
 
-    const sortedTop3 = podium.length > 0 ? podium : currentGameState.players.slice(0, 3);
+    const leaderboard = resultsData.leaderboard || [];
+    const podium = resultsData.podium || leaderboard.slice(0, 3);
+    const awards = resultsData.awards || {};
 
-    sortedTop3.forEach((p, idx) => {
-      const x = idx === 0 ? podiumX[0] : (idx === 1 ? podiumX[1] : podiumX[2]);
-      const h = idx === 0 ? podiumH[0] : (idx === 1 ? podiumH[1] : podiumH[2]);
-      const baseY = 540;
+    // --- PODIUM PILLARS (Top 3) ---
+    const podiumConfig = [
+      { rank: 1, x: 1100, h: 190, color: 0xFFD700, hex: '#FFD700', label: '1ST PLACE 👑', badge: 'GOLD' },
+      { rank: 2, x: 800, h: 145, color: 0xC0C0C0, hex: '#C0C0C0', label: '2ND PLACE 🥈', badge: 'SILVER' },
+      { rank: 3, x: 1400, h: 115, color: 0xCD7F32, hex: '#CD7F32', label: '3RD PLACE 🥉', badge: 'BRONZE' }
+    ];
 
+    const podiumOrder = [
+      podium[0] ? { p: podium[0], conf: podiumConfig[0] } : null,
+      podium[1] ? { p: podium[1], conf: podiumConfig[1] } : null,
+      podium[2] ? { p: podium[2], conf: podiumConfig[2] } : null
+    ].filter(Boolean);
+
+    const baseY = 420;
+
+    podiumOrder.forEach(({ p, conf }, idx) => {
+      const x = conf.x;
+      const h = conf.h;
+      const col = p.color ? p.color.num : (p.colorNum || 0x00f0ff);
+
+      // Pillar Box
       const pillar = this.add.graphics();
-      pillar.fillStyle(0x14142e, 0.9);
-      pillar.fillRoundedRect(x - 90, baseY - h, 180, h, 8);
-      pillar.lineStyle(3, podiumColors[idx] || 0xFFFFFF, 1);
-      pillar.strokeRoundedRect(x - 90, baseY - h, 180, h, 8);
+      pillar.fillStyle(0x12122c, 0.95);
+      pillar.fillRoundedRect(x - 110, baseY - h, 220, h, 12);
+      pillar.lineStyle(3, conf.color, 1);
+      pillar.strokeRoundedRect(x - 110, baseY - h, 220, h, 12);
       this.endedContainer.add(pillar);
 
+      // Pulsing Neon Glow Aura behind player avatar
+      const aura = this.add.graphics();
+      aura.lineStyle(3, conf.color, 0.8);
+      aura.strokeCircle(x, baseY - h - 38, 28);
+      this.endedContainer.add(aura);
+
+      // Player Avatar Pip
       const pip = this.add.graphics();
-      const col = p.color ? p.color.num : (p.colorNum || 0x00f0ff);
       pip.fillStyle(col, 1);
-      pip.fillCircle(x, baseY - h - 35, 18);
+      pip.fillCircle(x, baseY - h - 38, 20);
+      pip.lineStyle(2, 0xFFFFFF, 0.9);
+      pip.strokeCircle(x, baseY - h - 38, 20);
       this.endedContainer.add(pip);
 
-      const rankLabel = this.add.text(x, baseY - h + 24, ranks[idx], {
+      // Rank Label
+      const rankLabel = this.add.text(x, baseY - h + 22, conf.label, {
         fontFamily: 'sans-serif',
-        fontSize: '14px',
+        fontSize: '13px',
         fontStyle: 'bold',
-        color: '#FFFFFF'
+        color: conf.hex
       }).setOrigin(0.5);
 
-      const nameText = this.add.text(x, baseY - h + 55, p.name, {
+      // Name Text
+      const nameText = this.add.text(x, baseY - h + 50, p.name, {
         fontFamily: '"Impact", "Arial Black", sans-serif',
         fontSize: '22px',
         color: '#FFFFFF',
         letterSpacing: 1
       }).setOrigin(0.5);
 
-      const scoreText = this.add.text(x, baseY - h + 90, `${p.score} PTS`, {
+      // Score Text
+      const scoreText = this.add.text(x, baseY - h + 80, `${p.score} PTS`, {
         fontFamily: 'monospace',
         fontSize: '20px',
         fontStyle: 'bold',
         color: '#39FF14'
       }).setOrigin(0.5);
 
-      this.endedContainer.add([rankLabel, nameText, scoreText]);
+      // Tie-Break Detail Badge
+      let tieText = '';
+      if (p.epicLegendaryCount && p.epicLegendaryCount > 0) {
+        tieText = `💎 ${p.epicLegendaryCount} Epic/Leg`;
+      } else if (p.stats && p.stats.distanceMeters) {
+        tieText = `🏃 ${p.stats.distanceMeters}m moved`;
+      }
+
+      const tieDetail = this.add.text(x, baseY - h + 104, tieText, {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        color: '#8888BB'
+      }).setOrigin(0.5);
+
+      this.endedContainer.add([rankLabel, nameText, scoreText, tieDetail]);
     });
 
-    const btnY = WORLD_HEIGHT - 120;
-    const btnW = 320;
-    const btnH = 58;
+    // --- 3. SPECIAL AWARDS SECTION (5 Awards) ---
+    const awardsHeader = this.add.text(1100, 455, '⭐ SPECIAL RECOGNITION AWARDS ⭐', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '20px',
+      color: '#00F0FF',
+      letterSpacing: 3
+    }).setOrigin(0.5);
+    this.endedContainer.add(awardsHeader);
+
+    const awardKeys = ['explorer', 'chaosAgent', 'treasureHunter', 'speedDemon', 'vaultMaster'];
+    const awardLabels = [
+      { key: 'explorer', icon: '🧭', title: 'EXPLORER', color: '#00F0FF', def: 'Uncharted mapping' },
+      { key: 'chaosAgent', icon: '🌀', title: 'CHAOS AGENT', color: '#FF00FF', def: 'Anomaly master' },
+      { key: 'treasureHunter', icon: '💎', title: 'TREASURE HUNTER', color: '#FFE600', def: 'Loot hoarder' },
+      { key: 'speedDemon', icon: '⚡', title: 'SPEED DEMON', color: '#39FF14', def: 'Top sprinter' },
+      { key: 'vaultMaster', icon: '🗝️', title: 'VAULT MASTER', color: '#FFAA00', def: 'Citadel breaker' }
+    ];
+
+    const cardW = 280;
+    const cardH = 100;
+    const startX = 1100 - (2 * 300);
+
+    awardLabels.forEach((al, i) => {
+      const award = awards[al.key];
+      const ax = startX + i * 300;
+      const ay = 535;
+      const accentColorNum = Phaser.Display.Color.HexStringToColor(al.color).color;
+
+      const acard = this.add.graphics();
+      acard.fillStyle(0x0c0c22, 0.95);
+      acard.fillRoundedRect(ax - cardW / 2, ay - cardH / 2, cardW, cardH, 10);
+      acard.lineStyle(1.5, accentColorNum, award ? 0.9 : 0.4);
+      acard.strokeRoundedRect(ax - cardW / 2, ay - cardH / 2, cardW, cardH, 10);
+      this.endedContainer.add(acard);
+
+      const aIcon = this.add.text(ax - cardW / 2 + 32, ay, al.icon, { fontSize: '26px' }).setOrigin(0.5);
+      const aTitle = this.add.text(ax - cardW / 2 + 60, ay - 24, al.title, {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
+        fontSize: '14px',
+        color: al.color,
+        letterSpacing: 1.5
+      }).setOrigin(0, 0.5);
+
+      const winnerName = award ? award.recipientName : 'UNCLAIMED';
+      const winnerCol = award ? (award.colorHex || '#FFFFFF') : '#666688';
+
+      const aWinner = this.add.text(ax - cardW / 2 + 60, ay + 2, winnerName, {
+        fontFamily: 'sans-serif',
+        fontSize: '15px',
+        fontStyle: 'bold',
+        color: winnerCol
+      }).setOrigin(0, 0.5);
+
+      const aStat = this.add.text(ax - cardW / 2 + 60, ay + 24, award ? award.statValue : al.def, {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        color: '#8888AA'
+      }).setOrigin(0, 0.5);
+
+      this.endedContainer.add([aIcon, aTitle, aWinner, aStat]);
+    });
+
+    // --- 4. FULL LEADERBOARD TABLE (Ranks 4-20) ---
+    if (leaderboard.length > 3) {
+      const rest = leaderboard.slice(3, 10);
+      const restHeader = this.add.text(1100, 615, 'RANKINGS 4-10', {
+        fontFamily: 'sans-serif',
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: '#8888AA',
+        letterSpacing: 2
+      }).setOrigin(0.5);
+      this.endedContainer.add(restHeader);
+
+      const chipW = 200;
+      const chipH = 34;
+      const startChipX = 1100 - ((rest.length - 1) * (chipW + 12)) / 2;
+
+      rest.forEach((p, idx) => {
+        const cx = startChipX + idx * (chipW + 12);
+        const cy = 645;
+
+        const chip = this.add.graphics();
+        chip.fillStyle(0x0a0a1f, 0.9);
+        chip.fillRoundedRect(cx - chipW / 2, cy - chipH / 2, chipW, chipH, 6);
+        chip.lineStyle(1, 0x333366, 0.8);
+        chip.strokeRoundedRect(cx - chipW / 2, cy - chipH / 2, chipW, chipH, 6);
+
+        const col = p.color ? p.color.num : 0x00f0ff;
+        chip.fillStyle(col, 1);
+        chip.fillCircle(cx - chipW / 2 + 16, cy, 6);
+        this.endedContainer.add(chip);
+
+        const rankText = this.add.text(cx - chipW / 2 + 28, cy, `#${p.rank} ${p.name}`, {
+          fontFamily: 'sans-serif',
+          fontSize: '12px',
+          fontStyle: 'bold',
+          color: '#FFFFFF'
+        }).setOrigin(0, 0.5);
+
+        const scText = this.add.text(cx + chipW / 2 - 12, cy, `${p.score}p`, {
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          color: '#39FF14'
+        }).setOrigin(1, 0.5);
+
+        this.endedContainer.add([rankText, scText]);
+      });
+    }
+
+    // --- 5. RESET / NEW MATCH BUTTON ---
+    const btnY = WORLD_HEIGHT - 70;
+    const btnW = 360;
+    const btnH = 56;
 
     const resetBtn = this.add.graphics();
     resetBtn.fillStyle(0x00F0FF, 1);
-    resetBtn.fillRoundedRect(1100 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
+    resetBtn.fillRoundedRect(1100 - btnW / 2, btnY - btnH / 2, btnW, btnH, 14);
     resetBtn.lineStyle(2, 0xFFFFFF, 1);
-    resetBtn.strokeRoundedRect(1100 - btnW / 2, btnY - btnH / 2, btnW, btnH, 12);
+    resetBtn.strokeRoundedRect(1100 - btnW / 2, btnY - btnH / 2, btnW, btnH, 14);
     this.endedContainer.add(resetBtn);
 
-    const resetText = this.add.text(1100, btnY, 'RETURN TO LOBBY', {
+    const resetText = this.add.text(1100, btnY, 'START NEW MATCH [R]', {
       fontFamily: 'sans-serif',
-      fontSize: '20px',
+      fontSize: '18px',
       fontStyle: 'bold',
       color: '#050510',
       letterSpacing: 2
     }).setOrigin(0.5);
 
-    const keyHint = this.add.text(1100, btnY + 44, '[ Press R on keyboard to reset ]', {
+    const keyHint = this.add.text(1100, btnY + 40, '[ Press R on keyboard to reset match in same lobby ]', {
       fontFamily: 'sans-serif',
-      fontSize: '13px',
+      fontSize: '12px',
       color: '#00F0FF'
     }).setOrigin(0.5);
 
@@ -1756,8 +2261,6 @@ class HostScene extends Phaser.Scene {
     const zone = this.add.zone(1100, btnY, btnW, btnH).setOrigin(0.5).setInteractive({ useHandCursor: true });
     zone.on('pointerdown', () => this.triggerResetMatch());
     this.endedContainer.add(zone);
-
-    this.endedContainer.setDepth(200);
   }
 
   renderPoiMarkers() {

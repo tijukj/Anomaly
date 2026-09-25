@@ -124,9 +124,15 @@
     <!-- View 4: Match Ended View -->
     <div id="ended-view" class="view ended-layout">
       <div class="ended-header">
-        <div class="trophy-icon">🏆</div>
-        <h1 class="ended-title">MATCH FINISHED</h1>
-        <p class="ended-sub">LOOK AT BIG SCREEN FOR PODIUM CEREMONY</p>
+        <div class="trophy-icon" id="ended-trophy">🏆</div>
+        <h1 class="ended-title" id="ended-title-text">MATCH FINISHED</h1>
+        <p class="ended-sub" id="ended-sub-text">LOOK AT BIG SCREEN FOR PODIUM CEREMONY</p>
+      </div>
+
+      <!-- Special Award Badge if won by this player -->
+      <div id="ended-awards-badge" class="ended-awards-badge hidden">
+        <span class="award-star">⭐</span>
+        <span id="ended-awards-text">EXPLORER AWARD WINNER</span>
       </div>
 
       <div class="ended-stats-card">
@@ -139,7 +145,30 @@
           <span class="ended-stat-label">TOTAL SCORE</span>
           <span class="ended-stat-value score-highlight" id="ended-score">0 PTS</span>
         </div>
+        <div class="ended-divider"></div>
+        
+        <!-- Individual Stats Breakdown -->
+        <div class="ended-mini-stats-grid">
+          <div class="mini-stat-col">
+            <span class="mini-stat-val" id="stat-treasures">0</span>
+            <span class="mini-stat-lbl">💎 TREASURES</span>
+          </div>
+          <div class="mini-stat-col">
+            <span class="mini-stat-val" id="stat-chests">0</span>
+            <span class="mini-stat-lbl">📦 CHESTS</span>
+          </div>
+          <div class="mini-stat-col">
+            <span class="mini-stat-val" id="stat-vaults">0</span>
+            <span class="mini-stat-lbl">🗝️ VAULTS</span>
+          </div>
+          <div class="mini-stat-col">
+            <span class="mini-stat-val" id="stat-distance">0m</span>
+            <span class="mini-stat-lbl">🏃 DISTANCE</span>
+          </div>
+        </div>
       </div>
+
+      <div id="ended-podium-summary" class="ended-podium-summary"></div>
 
       <div class="ended-footer-tip">
         Host can press <b>R</b> to start a new match

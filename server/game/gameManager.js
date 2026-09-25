@@ -8,6 +8,7 @@ import { MissionManager } from './missions.js';
 import { ClueManager } from './clueManager.js';
 import { AnomalyManager } from './anomalyManager.js';
 import { HazardSentinelManager } from './sentinels.js';
+import { PlayerStatsTracker } from './statsTracker.js';
 import crypto from 'crypto';
 
 export class GameManager {
@@ -24,6 +25,7 @@ export class GameManager {
     // Subsystems
     this.scoring = new ScoringSystem(io);
     this.scoring.setGameManager(this);
+    this.statsTracker = new PlayerStatsTracker();
     this.clues = new ClueManager(this, this.scoring);
     this.interactables = new InteractableManager(this, this.scoring);
     this.missions = new MissionManager(this, this.scoring);
@@ -35,6 +37,8 @@ export class GameManager {
     this.matchTimeRemaining = this.totalMatchDurationSec;
     this.countdownRemaining = CONFIG.COUNTDOWN_DURATION_SEC;
     this.countdownInterval = null;
+    this.lastFinalCountdownCount = 0;
+    this.finalMatchResults = null;
     this.currentPhaseIndex = 0;
     this.currentPhase = CONFIG.PHASES[0];
 
@@ -60,6 +64,14 @@ export class GameManager {
     this.currentPhase = CONFIG.PHASES[0];
     this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
     this.matchTimeRemaining = this.totalMatchDurationSec;
+    this.lastFinalCountdownCount = 0;
+    this.finalMatchResults = null;
+    if (this.statsTracker) {
+      this.statsTracker.reset();
+      for (const p of this.players.values()) {
+        this.statsTracker.registerPlayer(p);
+      }
+    }
 
     const selectedTreasures = rng.pick(POI_POOLS.treasures, CONFIG.POI_COUNTS.TREASURES);
     const selectedChests = rng.pick(POI_POOLS.chests, CONFIG.POI_COUNTS.CHESTS);
@@ -108,6 +120,15 @@ export class GameManager {
 
       // Check Phase Transition
       this.updateMatchPhase(elapsedFraction);
+
+      // Final 10-Second Countdown (Host & Phone Vibration)
+      if (this.matchTimeRemaining <= 10 && this.matchTimeRemaining > 0) {
+        const count = Math.ceil(this.matchTimeRemaining);
+        if (this.lastFinalCountdownCount !== count) {
+          this.lastFinalCountdownCount = count;
+          this.io.emit('final_countdown_tick', { count });
+        }
+      }
 
       // Check Match End
       if (this.matchTimeRemaining <= 0) {
@@ -248,7 +269,7 @@ export class GameManager {
 
   endMatch() {
     this.state = CONFIG.STATES.ENDED;
-    console.log('[GameManager] 🏆 MATCH COMPLETED! Displaying final podium.');
+    console.log('[GameManager] 🏆 MATCH COMPLETED! Displaying final podium & awards.');
 
     // Freeze all player movement
     for (const p of this.players.values()) {
@@ -257,12 +278,19 @@ export class GameManager {
       p.input = { x: 0, y: 0, action: false };
     }
 
-    const finalLeaderboard = this.scoring.getLeaderboard(this.players);
-    this.io.emit('match_ended', {
-      leaderboard: finalLeaderboard,
-      podium: finalLeaderboard.slice(0, 3)
-    });
+    const finalLeaderboard = this.statsTracker.computeFinalLeaderboard(this.players);
+    const podium = finalLeaderboard.slice(0, 3);
+    const awards = this.statsTracker.computeSpecialAwards(finalLeaderboard);
+    const highlightCards = this.statsTracker.generateHighlightCards(finalLeaderboard, awards);
 
+    this.finalMatchResults = {
+      leaderboard: finalLeaderboard,
+      podium,
+      awards,
+      highlightCards
+    };
+
+    this.io.emit('match_ended', this.finalMatchResults);
     this.broadcastFullState();
   }
 
@@ -272,6 +300,9 @@ export class GameManager {
     this.state = CONFIG.STATES.LOBBY;
     this.matchTimeRemaining = this.totalMatchDurationSec;
     this.countdownRemaining = CONFIG.COUNTDOWN_DURATION_SEC;
+    this.lastFinalCountdownCount = 0;
+    this.finalMatchResults = null;
+    this.statsTracker.reset();
 
     // Reset player scores & positions, keep connections intact
     const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
@@ -353,8 +384,14 @@ export class GameManager {
     if (Math.abs(player.vy) < 0.2) player.vy = 0;
 
     // Apply Position
+    const prevX = player.x;
+    const prevY = player.y;
     player.x += player.vx * dt;
     player.y += player.vy * dt;
+
+    if (this.statsTracker) {
+      this.statsTracker.recordMovement(player, player.x - prevX, player.y - prevY);
+    }
 
     // World Boundary Hard Clamping
     const r = CONFIG.PHYSICS.PLAYER_RADIUS;
@@ -470,6 +507,9 @@ export class GameManager {
               color: player.color.hex,
               timestamp: Date.now()
             });
+            if (this.statsTracker) {
+              this.statsTracker.recordFirstDiscovery(player, region.id);
+            }
             this.scoring.awardPoints(player, CONFIG.SCORING.DISCOVERY_BONUS, `EXPLORED ${region.name}`, { x: player.x, y: player.y });
           }
         }
@@ -663,6 +703,10 @@ export class GameManager {
       console.log(`[GameManager] New player registered: ${player.name} (${newPlayerId})`);
     }
 
+    if (this.statsTracker) {
+      this.statsTracker.registerPlayer(player);
+    }
+
     this.socketToPlayerId.set(socket.id, player.id);
 
     socket.emit('joined_success', {
@@ -712,6 +756,7 @@ export class GameManager {
       seed: this.matchSeed,
       clueState: this.clues ? this.clues.getPublicClueState() : null,
       pendingRequests: pendingList,
+      finalResults: this.finalMatchResults || null,
       players: activePlayers.map(p => ({
         id: p.id,
         name: p.name,
