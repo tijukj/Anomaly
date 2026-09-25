@@ -216,6 +216,29 @@ export const CONFIG = {
     { hex: '#0077FE', num: 0x0077fe, name: 'Cobalt Neon' }
   ],
 
+  // 10 Fixed Animal Avatars for Retro Pixel-Art Characters
+  PLAYER_ANIMALS: [
+    { id: 'fox', name: 'Fox', icon: '🦊', color: '#FF7A00' },
+    { id: 'owl', name: 'Owl', icon: '🦉', color: '#8B5A2B' },
+    { id: 'cat', name: 'Cat', icon: '🐱', color: '#FFB800' },
+    { id: 'frog', name: 'Frog', icon: '🐸', color: '#39FF14' },
+    { id: 'bear', name: 'Bear', icon: '🐻', color: '#6A3805' },
+    { id: 'wolf', name: 'Wolf', icon: '🐺', color: '#A0B2C6' },
+    { id: 'bee', name: 'Bee', icon: '🐝', color: '#FFE600' },
+    { id: 'crab', name: 'Crab', icon: '🦀', color: '#FF0055' },
+    { id: 'panda', name: 'Panda', icon: '🐼', color: '#FFFFFF' },
+    { id: 'penguin', name: 'Penguin', icon: '🐧', color: '#00F0FF' }
+  ],
+
+  // UI Polish & Animation Durations
+  UI_POLISH: {
+    LEADERBOARD_SLIDE_DURATION_MS: 300,
+    EVENT_FEED_FLASH_DURATION_MS: 1000,
+    PHASE_TIMER_WARNING_THRESHOLD_SEC: 30,
+    SCREEN_FLASH_DURATION_MS: 1000,
+    CLUE_SLOT_FADE_DURATION_MS: 400
+  },
+
   // Game States
   STATES: {
     LOBBY: 'LOBBY',

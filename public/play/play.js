@@ -277,23 +277,26 @@ actionBtn.addEventListener('pointercancel', releaseAction);
 actionBtn.addEventListener('pointerleave', releaseAction);
 
 // -------------------------------------------------------------
-// Low-Latency Synchronized Input Loop (30Hz + Heartbeat)
+// Low-Latency Synchronized Input Loop (60Hz micro-throttle + Heartbeat)
 // -------------------------------------------------------------
-const TRANSMIT_INTERVAL_MS = 33; // ~30Hz smooth transmission rate
+const TRANSMIT_INTERVAL_MS = 16; // ~60Hz fast transmission rate
 let lastTransmitTime = 0;
 
 function transmitInputIfChanged(force = false) {
   if (!localPlayer || currentGameState !== 'RUNNING') return;
 
   const now = performance.now();
-  const hasChanged = 
-    Math.abs(currentInput.x - lastSentInput.x) > 0.015 ||
-    Math.abs(currentInput.y - lastSentInput.y) > 0.015 ||
-    currentInput.action !== lastSentInput.action;
+  const deltaX = Math.abs(currentInput.x - lastSentInput.x);
+  const deltaY = Math.abs(currentInput.y - lastSentInput.y);
+  const actionChanged = currentInput.action !== lastSentInput.action;
+  const hasChanged = deltaX > 0.01 || deltaY > 0.01 || actionChanged;
 
   const heartbeatExpired = (now - lastSendTimestamp) >= HEARTBEAT_MS;
 
-  if (force || (hasChanged && (now - lastTransmitTime >= TRANSMIT_INTERVAL_MS)) || heartbeatExpired) {
+  // Immediate send on significant joystick shift or action press, otherwise throttle to 16ms
+  const isUrgent = force || actionChanged || deltaX > 0.08 || deltaY > 0.08;
+
+  if (isUrgent || (hasChanged && (now - lastTransmitTime >= TRANSMIT_INTERVAL_MS)) || heartbeatExpired) {
     socket.emit('player_input', currentInput);
     lastSentInput = { ...currentInput };
     lastSendTimestamp = now;

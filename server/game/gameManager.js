@@ -558,6 +558,12 @@ export class GameManager {
     return color;
   }
 
+  getAvailableAnimal(colorHex) {
+    const colorIndex = CONFIG.PLAYER_COLORS.findIndex(c => c.hex === colorHex);
+    const animalIndex = colorIndex >= 0 ? colorIndex % CONFIG.PLAYER_ANIMALS.length : 0;
+    return CONFIG.PLAYER_ANIMALS[animalIndex] || CONFIG.PLAYER_ANIMALS[0];
+  }
+
   getPlazaSpawnPosition(index, total) {
     const count = Math.max(1, total);
     const angle = (index / count) * Math.PI * 2;
@@ -673,6 +679,7 @@ export class GameManager {
 
       const newPlayerId = playerId || crypto.randomUUID();
       const color = this.getAvailableColor();
+      const animal = this.getAvailableAnimal(color.hex);
       const spawn = this.getPlazaSpawnPosition(connectedCount, CONFIG.MAX_PLAYERS);
 
       player = {
@@ -680,6 +687,7 @@ export class GameManager {
         socketId: socket.id,
         name: sanitizedName,
         color: color,
+        animal: animal,
         connected: true,
         x: spawn.x,
         y: spawn.y,
@@ -700,7 +708,7 @@ export class GameManager {
         this.missions.assignMission(player, elapsed);
       }
 
-      console.log(`[GameManager] New player registered: ${player.name} (${newPlayerId})`);
+      console.log(`[GameManager] New player registered: ${player.name} (${newPlayerId}) [Animal: ${animal.name}]`);
     }
 
     if (this.statsTracker) {
@@ -714,6 +722,7 @@ export class GameManager {
         id: player.id,
         name: player.name,
         color: player.color,
+        animal: player.animal,
         score: player.score || 0
       },
       gameState: this.state
@@ -761,6 +770,7 @@ export class GameManager {
         id: p.id,
         name: p.name,
         color: p.color,
+        animal: p.animal || this.getAvailableAnimal(p.color ? p.color.hex : ''),
         score: p.score || 0,
         hasKey: Boolean(p.hasKey)
       }))
@@ -779,6 +789,7 @@ export class GameManager {
         name: p.name,
         colorNum: p.color.num,
         colorHex: p.color.hex,
+        animalId: p.animal ? p.animal.id : this.getAvailableAnimal(p.color.hex).id,
         x: Math.round(p.x),
         y: Math.round(p.y),
         vx: Math.round(p.vx),

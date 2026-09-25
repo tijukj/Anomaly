@@ -393,11 +393,374 @@ const sounds = new SoundEngine();
 window.addEventListener('click', () => sounds.init(), { once: true });
 window.addEventListener('keydown', () => sounds.init(), { once: true });
 
+// Procedural 16x16 Pixel Art Generator (scaled 2x with zero external assets)
+function generatePixelCanvas(pixelGrid, palette, scale = 2) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 16 * scale;
+  canvas.height = 16 * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const char = pixelGrid[y] ? pixelGrid[y][x] : '.';
+      if (char && char !== '.' && palette[char]) {
+        ctx.fillStyle = palette[char];
+        ctx.fillRect(x * scale, y * scale, scale, scale);
+      }
+    }
+  }
+  return canvas;
+}
+
+function initPixelArtTextures(scene) {
+  // 10 Animal Avatars
+  const animals = {
+    fox: {
+      grid: [
+        '..OO........OO..',
+        '.OXXO......OXXO.',
+        '.OXXXO....OXXXO.',
+        '.OXXXXOOOOXXXXO.',
+        '..OXXXXXXXXXXO..',
+        '.OXXXXXXXXXXXXO.',
+        '.OXXXXXXXXXXXXO.',
+        '.OXXWWXXXXWWXXO.',
+        '.OXWBBWXXWBBWXO.',
+        '.OXXWWXXXXWWXXO.',
+        '..OXXXWWWWXXXO..',
+        '...OXXWWWWXXO...',
+        '....OXWKKWXO....',
+        '.....OXXXXO.....',
+        '......OXXO......',
+        '.......OO.......'
+      ],
+      palette: { O: '#8B3A00', X: '#FF7A00', W: '#FFFFFF', B: '#00F0FF', K: '#111111' }
+    },
+    owl: {
+      grid: [
+        '...O........O...',
+        '..OOO......OOO..',
+        '.OXXXOOOOOOXXXO.',
+        '.OXXXXXXXXXXXXO.',
+        'OXXXXXXXXXXXXXXO',
+        'OXXXWWXXXXWWXXXO',
+        'OXXWYYWXXWYYWXXO',
+        'OXXWYKWXXWYKWXXO',
+        'OXXXWWXXXXWWXXXO',
+        'OXXXXXXOOXXXXXXO',
+        '.OXXXXOXXOXXXXO.',
+        '.OXXXXOOOOXXXXO.',
+        '..OXXXXXXXXXXO..',
+        '..OXXYYYYYYXXO..',
+        '...OXXXXXXXXO...',
+        '....OOOOOOOO....'
+      ],
+      palette: { O: '#4A2A0C', X: '#8B5A2B', W: '#FFFFFF', Y: '#FFE600', K: '#111111' }
+    },
+    cat: {
+      grid: [
+        '.OO..........OO.',
+        '.OPPO......OPPO.',
+        '.OXXPO....OPXXO.',
+        '.OXXXXOOOOXXXXO.',
+        'OXXXXXXXXXXXXXXO',
+        'OXXXXXXXXXXXXXXO',
+        'OXXXGGXXXXGGXXXO',
+        'OXXGKKGXXGKKGXXO',
+        'OXXXGGXXXXGGXXXO',
+        'OXXXXXXXXXXXXXXO',
+        'OXXWXXPPPPXXWXXO',
+        'OXXXWXXKKXXWXXXO',
+        '.OXXXXXWWXXXXXO.',
+        '..OXXXXXXXXXXO..',
+        '...OXXXXXXXXO...',
+        '....OOOOOOOO....'
+      ],
+      palette: { O: '#8B5000', X: '#FFB800', P: '#FF88AA', G: '#39FF14', K: '#111111', W: '#FFFFFF' }
+    },
+    frog: {
+      grid: [
+        '..OOOO....OOOO..',
+        '.OWWWWO..OWWWWO.',
+        '.OWKKWO..OWKKWO.',
+        'OOWWWWOOOOWWWWOO',
+        'OXXXXXXXXXXXXXXO',
+        'OXXXXXXXXXXXXXXO',
+        'OXXXXXXXXXXXXXXO',
+        'OXXXXXXXXXXXXXXO',
+        'OLLXXXXXXXXXXLLO',
+        'OLLLLLLLLLLLLLLO',
+        '.OLLLLLLLLLLLLO.',
+        '.OXXXXXXXXXXXXO.',
+        '..OLLLLLLLLLLO..',
+        '...OXXXXXXXXO...',
+        '....OXXXXXXO....',
+        '.....OOOOOO.....'
+      ],
+      palette: { O: '#1E6B05', X: '#39FF14', L: '#8DFF66', W: '#FFFFFF', K: '#111111' }
+    },
+    bear: {
+      grid: [
+        '.OOOO......OOOO.',
+        'OLLLLOO..OOLLLLO',
+        'OLLLLLOOOOLLLLLO',
+        'OLLXXXXXXXXXXLLO',
+        '.OXXXXXXXXXXXXO.',
+        'OXXXXXXXXXXXXXXO',
+        'OXXKKXXXXXXKKXXO',
+        'OXXKKXXXXXXKKXXO',
+        'OXXXXXMMMMXXXXXO',
+        'OXXXXMMMMMMXXXXO',
+        'OXXXXMKKKKMXXXXO',
+        'OXXXXMMKKMMXXXXO',
+        '.OXXXXMMMMXXXXO.',
+        '..OXXXXXXXXXXO..',
+        '...OXXXXXXXXO...',
+        '....OOOOOOOO....'
+      ],
+      palette: { O: '#3D1C02', X: '#6A3805', L: '#9C5B18', M: '#E5B887', K: '#111111' }
+    },
+    wolf: {
+      grid: [
+        '.OO..........OO.',
+        '.OXXO......OXXO.',
+        '.OLLXO....OXLXO.',
+        '.OLLXXOOOOXXLLO.',
+        '..OXXXXXXXXXXO..',
+        '.OXXXXXXXXXXXXO.',
+        'OXXXXXLLLLXXXXXO',
+        'OXXXWWXXXXWWXXXO',
+        'OXXWYYWXXWYYWXXO',
+        'OXXXWWXXXXWWXXXO',
+        'OXXXXXWWWWXXXXXO',
+        '.OXXXWWKKWWXXXO.',
+        '..OXXXWWWWXXXO..',
+        '...OXXXXXXXXO...',
+        '....OXXXXXXO....',
+        '.....OOOOOO.....'
+      ],
+      palette: { O: '#354350', X: '#7A8C9E', L: '#A0B2C6', W: '#FFFFFF', Y: '#00F0FF', K: '#111111' }
+    },
+    bee: {
+      grid: [
+        '....O......O....',
+        '...OK......KO...',
+        '....OK....KO....',
+        '..CCCCOOOOCCCC..',
+        '.CCWCCYYYYCCWCC.',
+        '.CCWCCYYYYCCWCC.',
+        '.CCCCCKKKKCCCCC.',
+        '.....CKKKKC.....',
+        '.....CYYYYC.....',
+        '.....CYYYYC.....',
+        '.....CKKKKC.....',
+        '.....CKKKKC.....',
+        '......CYYC......',
+        '......CYYC......',
+        '.......CK.......',
+        '........K.......'
+      ],
+      palette: { O: '#111111', K: '#111111', Y: '#FFE600', C: '#00F0FF', W: '#FFFFFF' }
+    },
+    crab: {
+      grid: [
+        '..OO........OO..',
+        '.OXXO......OXXO.',
+        'OXXXXO....OXXXXO',
+        'OXX..O....O..XXO',
+        '.O..OOOOOOOO..O.',
+        '...OWWW..WWWO...',
+        '...OWKK..KKWO...',
+        '..OXXXXXXXXXXO..',
+        '.OXXXXXXXXXXXXO.',
+        'OXXXXXXXXXXXXXXO',
+        'OXXXXXXXXXXXXXXO',
+        '.OXXXXXXXXXXXXO.',
+        'O.O.O.OOOO.O.O.O',
+        'O.O.O......O.O.O',
+        '.O.O........O.O.',
+        '................'
+      ],
+      palette: { O: '#800020', X: '#FF0055', W: '#FFFFFF', K: '#111111' }
+    },
+    panda: {
+      grid: [
+        '.KKKK......KKKK.',
+        'KKKKKKO..OKKKKKK',
+        'KKKKKKKOOKKKKKKK',
+        '.KKKKKWWWWKKKKK.',
+        '..OWWWWWWWWWWO..',
+        '.OWWWWWWWWWWWWO.',
+        '.OWKKKWWWWKKKWO.',
+        'OWKKKKKWWKKKKKWO',
+        'OWKKKKKWWKKKKKWO',
+        '.OWKKKWWWWKKKWO.',
+        '.OWWWWWKKWWWWWO.',
+        '..OWWWKKKKWWWO..',
+        '...OWWKKKKWWO...',
+        '....OWWWWWWO....',
+        '.....OWWWWO.....',
+        '......OOOO......'
+      ],
+      palette: { O: '#222233', K: '#111111', W: '#FFFFFF' }
+    },
+    penguin: {
+      grid: [
+        '......OOOO......',
+        '.....OKKKKO.....',
+        '....OKKKKKKO....',
+        '...OKWKKKKWKO...',
+        '...OKBKKKKBKO...',
+        '...OKWKKKKWKO...',
+        '....OKYYYYKO....',
+        '....OKYYYYKO....',
+        '...OKKWWWWKKO...',
+        '..OKKKWWWWKKKO..',
+        '.OKKKKWWWWKKKKO.',
+        '.OKKKKWWWWKKKKO.',
+        '..OKKKWWWWKKKO..',
+        '...OKKKKKKKKO...',
+        '....OYY..YYO....',
+        '.....YY..YY.....'
+      ],
+      palette: { O: '#050510', K: '#1E2538', W: '#FFFFFF', B: '#00F0FF', Y: '#FFAA00' }
+    }
+  };
+
+  for (const [id, data] of Object.entries(animals)) {
+    const key = `animal_${id}`;
+    if (!scene.textures.exists(key)) {
+      const canvas = generatePixelCanvas(data.grid, data.palette, 2);
+      scene.textures.addCanvas(key, canvas);
+    }
+  }
+
+  // 5 Treasure Tier Textures
+  const treasures = {
+    common: {
+      grid: [
+        '......OOOO......',
+        '....OOYYYYOO....',
+        '...OYYYYYYYYO...',
+        '..OYYWYYYYYYYO..',
+        '.OYYWWYYGGYYYYO.',
+        '.OYYWYYYGGYYYYO.',
+        'OYYYYYYGGGGYYYYO',
+        'OYYYYYGGGGYYYYYO',
+        'OYYYYYYGGGGYYYYO',
+        'OYYYYYYYGGYYYYYO',
+        '.OYYYYYYGGYYYYO.',
+        '.OYYYYYYYYYYYYO.',
+        '..OYYYYYYYYYYO..',
+        '...OYYYYYYYYO...',
+        '....OOYYYYOO....',
+        '......OOOO......'
+      ],
+      palette: { O: '#8B7500', Y: '#FFE600', W: '#FFFFFF', G: '#D4AF37' }
+    },
+    rare: {
+      grid: [
+        '......OOOO......',
+        '....OOCCCCWW....',
+        '...OCCCCCCWWCO..',
+        '..OCCCCCCCCCCWCO',
+        '.OCCCCCCCCCCCCCO',
+        'OCCCCCCCCCCCCCCW',
+        'OWWWWWWWWWWWWWWO',
+        '.OWCCCCCCCCCCCCO',
+        '..OWCCCCCCCCCO..',
+        '...OWCCCCCCCO...',
+        '....OWCCCCCO....',
+        '.....OWCCCO.....',
+        '......OWCO......',
+        '.......OW.......',
+        '........O.......',
+        '................'
+      ],
+      palette: { O: '#005577', C: '#00F0FF', W: '#FFFFFF' }
+    },
+    epic: {
+      grid: [
+        '.......WW.......',
+        '......OPPO......',
+        '.....OPPPPO.....',
+        '....OPPPPPPPO...',
+        '..OOPPPPPPPPOO..',
+        '.OPPPPPPPPPPPPO.',
+        'WPPPPPWWWWPWWPPW',
+        'OPPPPPWWWWPPPPPO',
+        'OPPPPPWWWWPPPPPO',
+        'WPPPPPWWWWWPPPWW',
+        '.OPPPPPPPPPPPPO.',
+        '..OOPPPPPPPPOO..',
+        '....OPPPPPPPO...',
+        '.....OPPPPO.....',
+        '......OPPO......',
+        '.......WW.......'
+      ],
+      palette: { O: '#880044', P: '#FF0055', W: '#FFFFFF' }
+    },
+    legendary: {
+      grid: [
+        '.WW...WWWW...WW.',
+        '.GG...GGGG...GG.',
+        'OGGO.OGGGGO.OGGO',
+        'OGGO.OGGGGO.OGGO',
+        '.OGGOOGGGGOOGGO.',
+        '.OGGGGGGGGGGGGO.',
+        '..OGGGGGGGGGGO..',
+        '..OGGRRGGBBGGO..',
+        '..OGGGGGGGGGGO..',
+        '..OGGGGGGGGGGO..',
+        '...OGGGGGGGGO...',
+        '...OGGGGGGGGO...',
+        '....OGGGGGGO....',
+        '....OGGGGGGO....',
+        '..OOGGGGGGGGOO..',
+        '..OOOOOOOOOOOO..'
+      ],
+      palette: { O: '#664400', G: '#FFE600', W: '#FFFFFF', R: '#FF0055', B: '#00F0FF' }
+    },
+    glitch: {
+      grid: [
+        '........WW......',
+        '.......OPPO.....',
+        '......OPPPPO....',
+        '.....OPPCCCO....',
+        '....OPPCCCCO....',
+        '...OPCCCCCO.....',
+        '..OPCCCCCCPO....',
+        '..OPPCCCCCCCC...',
+        '....CCCCCCOPPO..',
+        '....OCCCCOPPPO..',
+        '.....OCCCCOPPO..',
+        '......OCCOPPPO..',
+        '.......OCOPPPO..',
+        '........OOPPPO..',
+        '.........OPPO...',
+        '..........WW....'
+      ],
+      palette: { O: '#440044', P: '#FF00FF', C: '#00F0FF', W: '#FFFFFF' }
+    }
+  };
+
+  for (const [tier, data] of Object.entries(treasures)) {
+    const key = `treasure_${tier}`;
+    if (!scene.textures.exists(key)) {
+      const canvas = generatePixelCanvas(data.grid, data.palette, 2);
+      scene.textures.addCanvas(key, canvas);
+    }
+  }
+}
+
 class HostScene extends Phaser.Scene {
   constructor() {
     super({ key: 'HostScene' });
     this.playerMap = new Map();
     this.interactablesGraphics = null;
+    this.interactableSpriteMap = new Map();
+    this.leaderboardRowMap = new Map();
+    this.borderFlashGraphics = null;
     this.sentinelsGraphics = null;
     this.hudContainer = null;
     this.countdownContainer = null;
@@ -413,6 +776,7 @@ class HostScene extends Phaser.Scene {
     this.hostEvents = [];
     this.pendingRequests = [];
     this.lastRenderedState = '';
+    this.lastCluesCount = 0;
   }
 
   preload() {
@@ -426,6 +790,7 @@ class HostScene extends Phaser.Scene {
 
   create() {
     sounds.init();
+    initPixelArtTextures(this);
     this.cameras.main.setBackgroundColor('#070714');
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
@@ -780,9 +1145,63 @@ class HostScene extends Phaser.Scene {
     this.joinRequestContainer.add([title, sub, appText, appZone]);
   }
 
+  triggerScreenBorderFlash(colorHex = '#FFE600', durationMs = 1000) {
+    if (!this.borderFlashGraphics) {
+      this.borderFlashGraphics = this.add.graphics();
+      this.borderFlashGraphics.setDepth(999);
+    }
+    const colorNum = Phaser.Display.Color.HexStringToColor(colorHex).color;
+    this.borderFlashGraphics.clear();
+    this.borderFlashGraphics.lineStyle(14, colorNum, 0.95);
+    this.borderFlashGraphics.strokeRect(7, 7, WORLD_WIDTH - 14, WORLD_HEIGHT - 14);
+    this.borderFlashGraphics.setAlpha(1);
+
+    this.tweens.killTweensOf(this.borderFlashGraphics);
+    this.tweens.add({
+      targets: this.borderFlashGraphics,
+      alpha: 0,
+      duration: durationMs,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        if (this.borderFlashGraphics) this.borderFlashGraphics.clear();
+      }
+    });
+  }
+
   addHostEvent(event) {
+    // Determine icon
+    let icon = event.icon;
+    if (!icon) {
+      const type = (event.type || '').toLowerCase();
+      const text = (event.text || '').toLowerCase();
+      if (type.includes('treasure') || text.includes('treasure')) icon = '💎';
+      else if (type.includes('vault') || text.includes('vault')) icon = '🗝️';
+      else if (type.includes('chest') || text.includes('chest')) icon = '📦';
+      else if (type.includes('anomaly') || text.includes('anomaly')) icon = '🌀';
+      else if (type.includes('clue') || text.includes('clue')) icon = '📜';
+      else if (type.includes('mission') || text.includes('mission')) icon = '🎯';
+      else if (type.includes('hazard') || text.includes('hazard')) icon = '💥';
+      else if (type.includes('crown') || text.includes('crown')) icon = '👑';
+      else if (type.includes('lead') || text.includes('rank') || text.includes('podium') || text.includes('winner')) icon = '🏆';
+      else if (type.includes('portal') || text.includes('portal')) icon = '🌀';
+      else if (type.includes('merchant') || text.includes('merchant')) icon = '💰';
+      else icon = '⚡';
+    }
+
+    let displayText = event.text || '';
+    if (!displayText.startsWith(icon)) {
+      displayText = `${icon} ${displayText}`;
+    }
+
+    const enrichedEvent = {
+      ...event,
+      icon,
+      text: displayText,
+      createdAt: Date.now()
+    };
+
     // Keep last 8 events with newest on top
-    this.hostEvents.unshift(event);
+    this.hostEvents.unshift(enrichedEvent);
     if (this.hostEvents.length > 8) {
       this.hostEvents.pop();
     }
@@ -813,8 +1232,25 @@ class HostScene extends Phaser.Scene {
     });
     this.eventFeedContainer.add(title);
 
+    const now = Date.now();
     this.hostEvents.forEach((ev, idx) => {
       const lineY = 42 + idx * 48;
+      const isRecent = (now - ev.createdAt) < 1000;
+
+      if (isRecent) {
+        const flash = this.add.graphics();
+        flash.fillStyle(0x00F0FF, 0.28);
+        flash.fillRoundedRect(6, lineY - 4, width - 12, 42, 6);
+        this.eventFeedContainer.add(flash);
+        this.tweens.add({
+          targets: flash,
+          alpha: 0,
+          duration: 900,
+          ease: 'Cubic.easeOut',
+          onComplete: () => flash.destroy()
+        });
+      }
+
       const text = this.add.text(12, lineY, ev.text || '', {
         fontFamily: 'sans-serif',
         fontSize: '11px',
@@ -827,14 +1263,15 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Right Column: Public "Known Clues" Panel (Completely outside map)
+  // Right Column: Public "Known Clues" Panel (3 Fixed Slots)
   drawKnownCluesPanel(knownClues = [], chainTitle = '', clueState = null) {
     this.cluesPanelContainer.removeAll(true);
     if (currentGameState.state !== 'RUNNING') return;
 
     const width = 240;
     const cluesList = knownClues || [];
-    const boxH = 50 + Math.max(1, cluesList.length) * 44;
+    const totalSlots = 3;
+    const boxH = 46 + totalSlots * 46;
 
     const bg = this.add.graphics();
     bg.fillStyle(0x0a0a1e, 0.92);
@@ -851,33 +1288,69 @@ class HostScene extends Phaser.Scene {
     });
     this.cluesPanelContainer.add(header);
 
-    if (cluesList.length === 0) {
-      const hint = this.add.text(12, 38, 'Awakens at 6:00 (Hunt)...', {
-        fontFamily: 'sans-serif',
-        fontSize: '11px',
-        fontStyle: 'italic',
-        color: '#777799'
-      });
-      this.cluesPanelContainer.add(hint);
-    } else {
-      cluesList.forEach((clue, idx) => {
-        const itemY = 36 + idx * 42;
-        const clueBadge = this.add.text(12, itemY, `✓ #${clue.step}: ${clue.shortHint || clue.region.toUpperCase()}`, {
+    for (let i = 0; i < totalSlots; i++) {
+      const itemY = 40 + i * 44;
+      const clue = cluesList[i];
+
+      if (clue) {
+        const slotContainer = this.add.container(0, 0);
+
+        const slotBg = this.add.graphics();
+        slotBg.fillStyle(0x00F0FF, 0.12);
+        slotBg.fillRoundedRect(8, itemY, width - 16, 38, 6);
+        slotBg.lineStyle(1, 0x00F0FF, 0.6);
+        slotBg.strokeRoundedRect(8, itemY, width - 16, 38, 6);
+        slotContainer.add(slotBg);
+
+        const clueBadge = this.add.text(14, itemY + 4, `📜 #${clue.step || i + 1}: ${(clue.shortHint || clue.region || 'REVEALED').toUpperCase()}`, {
           fontFamily: 'sans-serif',
           fontSize: '11px',
           fontStyle: 'bold',
           color: '#00F0FF'
         });
 
-        const finder = this.add.text(12, itemY + 18, `By: ${clue.discoverer}`, {
+        const finder = this.add.text(14, itemY + 20, `Found by: ${clue.discoverer || 'Unknown'}`, {
           fontFamily: 'sans-serif',
           fontSize: '10px',
-          color: clue.colorHex || '#FFFFFF'
+          color: clue.colorHex || '#FFE600'
         });
 
-        this.cluesPanelContainer.add([clueBadge, finder]);
-      });
+        slotContainer.add([clueBadge, finder]);
+        this.cluesPanelContainer.add(slotContainer);
+
+        // Animate new discovery
+        if (i === cluesList.length - 1 && cluesList.length > this.lastCluesCount) {
+          slotContainer.setAlpha(0);
+          slotContainer.setX(20);
+          this.tweens.add({
+            targets: slotContainer,
+            alpha: 1,
+            x: 0,
+            duration: 400,
+            ease: 'Cubic.easeOut'
+          });
+        }
+      } else {
+        // Locked Slot Placeholder
+        const lockBg = this.add.graphics();
+        lockBg.fillStyle(0x070718, 0.6);
+        lockBg.fillRoundedRect(8, itemY, width - 16, 38, 6);
+        lockBg.lineStyle(1, 0x333355, 0.6);
+        lockBg.strokeRoundedRect(8, itemY, width - 16, 38, 6);
+
+        const lockText = this.add.text(width / 2, itemY + 19, `[ 🔒 CLUE #${i + 1}: LOCKED ]`, {
+          fontFamily: 'monospace',
+          fontSize: '10px',
+          fontStyle: 'bold',
+          color: '#555577',
+          letterSpacing: 1
+        }).setOrigin(0.5);
+
+        this.cluesPanelContainer.add([lockBg, lockText]);
+      }
     }
+
+    this.lastCluesCount = cluesList.length;
   }
 
   // Right Column: Controls & Actions Panel
@@ -978,6 +1451,7 @@ class HostScene extends Phaser.Scene {
 
   // Final Revelation Banner (8:00 Mark)
   showFinalRevelationBanner(data) {
+    this.triggerScreenBorderFlash('#FFE600', 1200);
     const banner = this.add.container(1100, -140);
 
     const bg = this.add.graphics();
@@ -1025,6 +1499,7 @@ class HostScene extends Phaser.Scene {
 
   // Grand Celebration on Legendary Treasure Claim (+150 pts)
   showLegendaryFoundCelebration(data) {
+    this.triggerScreenBorderFlash('#FFE600', 1500);
     this.celebrationContainer.removeAll(true);
 
     const overlay = this.add.graphics();
@@ -1375,9 +1850,11 @@ class HostScene extends Phaser.Scene {
     this.hudContainer.removeAll(true);
     if (currentGameState.state !== 'RUNNING') return;
 
-    const timeFormatted = formatTime(currentGameState.timeRemaining || 0);
+    const timeRemaining = currentGameState.timeRemaining || 0;
+    const timeFormatted = formatTime(timeRemaining);
     const phase = currentGameState.phase || { name: 'PHASE 1: DISCOVERY', colorHex: '#00F0FF' };
-    const isUrgent = currentGameState.timeRemaining <= 60;
+    const isUrgent = timeRemaining <= 60;
+    const isWarning = timeRemaining <= 30;
 
     const hudBox = this.add.graphics();
     hudBox.fillStyle(0x0a0a1e, 0.95);
@@ -1386,12 +1863,22 @@ class HostScene extends Phaser.Scene {
     hudBox.strokeRoundedRect(-200, 0, 400, 52, 12);
     this.hudContainer.add(hudBox);
 
+    let timerColor = isUrgent ? '#FF0055' : '#FFFFFF';
+    if (isWarning) {
+      const pulseRatio = (Math.sin(this.time.now / 150) + 1) / 2;
+      timerColor = pulseRatio > 0.5 ? '#FF0055' : '#FFAA00';
+    }
+
     const timerText = this.add.text(-90, 26, `TIME ${timeFormatted}`, {
       fontFamily: '"Impact", "Arial Black", sans-serif',
       fontSize: '28px',
-      color: isUrgent ? '#FF0055' : '#FFFFFF',
+      color: timerColor,
       letterSpacing: 2
     }).setOrigin(0.5);
+
+    if (isWarning) {
+      timerText.setScale(1 + Math.sin(this.time.now / 150) * 0.08);
+    }
 
     const phaseBadge = this.add.text(80, 26, phase.name, {
       fontFamily: 'sans-serif',
@@ -1458,20 +1945,33 @@ class HostScene extends Phaser.Scene {
     if (!entities) return;
 
     const ox = ARENA_OFFSET_X;
+    const activeIds = new Set();
 
     for (const ent of entities) {
       if (ent.state !== 'active' && ent.state !== 'revealed') continue;
+      activeIds.add(ent.id);
 
       const ex = ent.x + ox;
       const ey = ent.y;
 
       if (ent.type === 'treasure') {
-        this.interactablesGraphics.fillStyle(ent.colorNum || 0x00f0ff, 0.9);
-        this.interactablesGraphics.fillCircle(ex, ey, 9);
-        this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
-        this.interactablesGraphics.strokeCircle(ex, ey, 9);
-        this.interactablesGraphics.fillStyle(0xFFFFFF, 0.9);
-        this.interactablesGraphics.fillCircle(ex - 2, ey - 2, 2.5);
+        const tier = ent.tier || 'common';
+        const texKey = `treasure_${tier}`;
+
+        // Soft tier-colored aura
+        const glowColor = ent.colorNum || (tier === 'epic' ? 0xff0055 : (tier === 'rare' ? 0xffe600 : 0x00f0ff));
+        this.interactablesGraphics.fillStyle(glowColor, 0.35);
+        this.interactablesGraphics.fillCircle(ex, ey, 14);
+
+        let sprite = this.interactableSpriteMap.get(ent.id);
+        if (!sprite) {
+          sprite = this.add.image(ex, ey, texKey).setDisplaySize(24, 24).setDepth(20);
+          this.interactableSpriteMap.set(ent.id, sprite);
+        } else {
+          sprite.setPosition(ex, ey);
+          sprite.setTexture(texKey);
+          sprite.setVisible(true);
+        }
       } else if (ent.type === 'glitch') {
         const now = Date.now();
         const remFraction = ent.expiresAt ? Math.max(0, (ent.expiresAt - now) / ((ent.durationSec || 10) * 1000)) : 1.0;
@@ -1481,12 +1981,33 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.arc(ex, ey, 22, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * remFraction), false);
         this.interactablesGraphics.strokePath();
 
-        this.interactablesGraphics.fillStyle(0xFF00FF, 0.95);
-        this.interactablesGraphics.fillCircle(ex, ey, 12);
-        this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeCircle(ex, ey, 12);
-        this.interactablesGraphics.fillStyle(0xFFFFFF, 0.9);
-        this.interactablesGraphics.fillCircle(ex - 3, ey - 3, 3);
+        this.interactablesGraphics.fillStyle(0xFF00FF, 0.35);
+        this.interactablesGraphics.fillCircle(ex, ey, 16);
+
+        let sprite = this.interactableSpriteMap.get(ent.id);
+        if (!sprite) {
+          sprite = this.add.image(ex, ey, 'treasure_glitch').setDisplaySize(28, 28).setDepth(21);
+          this.interactableSpriteMap.set(ent.id, sprite);
+        } else {
+          sprite.setPosition(ex, ey);
+          sprite.setTexture('treasure_glitch');
+          sprite.setVisible(true);
+        }
+      } else if (ent.type === 'legendary_vault') {
+        this.interactablesGraphics.fillStyle(0x050518, 0.95);
+        this.interactablesGraphics.fillRoundedRect(ex - 24, ey - 24, 48, 48, 10);
+        this.interactablesGraphics.lineStyle(3, 0xFFE600, 1);
+        this.interactablesGraphics.strokeRoundedRect(ex - 24, ey - 24, 48, 48, 10);
+
+        let sprite = this.interactableSpriteMap.get(ent.id);
+        if (!sprite) {
+          sprite = this.add.image(ex, ey, 'treasure_legendary').setDisplaySize(32, 32).setDepth(22);
+          this.interactableSpriteMap.set(ent.id, sprite);
+        } else {
+          sprite.setPosition(ex, ey);
+          sprite.setTexture('treasure_legendary');
+          sprite.setVisible(true);
+        }
       } else if (ent.type === 'clue') {
         this.interactablesGraphics.fillStyle(0x00F0FF, 0.95);
         this.interactablesGraphics.fillCircle(ex, ey, 14);
@@ -1499,15 +2020,6 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.fillCircle(ex, ey, 11);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
         this.interactablesGraphics.strokeCircle(ex, ey, 11);
-      } else if (ent.type === 'legendary_vault') {
-        this.interactablesGraphics.fillStyle(0xFFE600, 1);
-        this.interactablesGraphics.fillRoundedRect(ex - 22, ey - 22, 44, 44, 8);
-        this.interactablesGraphics.lineStyle(3, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeRoundedRect(ex - 22, ey - 22, 44, 44, 8);
-        this.interactablesGraphics.fillStyle(0x050518, 1);
-        this.interactablesGraphics.fillCircle(ex, ey, 10);
-        this.interactablesGraphics.fillStyle(0xFFE600, 1);
-        this.interactablesGraphics.fillCircle(ex, ey, 5);
       } else if (ent.type === 'chest') {
         this.interactablesGraphics.fillStyle(0xFFAA00, 0.95);
         this.interactablesGraphics.fillRoundedRect(ex - 14, ey - 12, 28, 24, 4);
@@ -1543,6 +2055,14 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.strokeCircle(ex, ey, 12);
       }
     }
+
+    // Clean up inactive interactable sprites
+    for (const [id, sprite] of this.interactableSpriteMap.entries()) {
+      if (!activeIds.has(id)) {
+        sprite.destroy();
+        this.interactableSpriteMap.delete(id);
+      }
+    }
   }
 
   // Draw Roaming Hazard Sentinels (Deduct points on touch)
@@ -1570,56 +2090,136 @@ class HostScene extends Phaser.Scene {
     }
   }
 
-  // Right Column: Top 5 Leaderboard (Completely outside map)
+  // Right Column: Top 5 Leaderboard with Smooth 300ms Sliding & Flash
   drawHostLeaderboard(leaderboard = []) {
-    this.leaderboardContainer.removeAll(true);
-    if (currentGameState.state !== 'RUNNING') return;
+    if (currentGameState.state !== 'RUNNING') {
+      this.leaderboardContainer.removeAll(true);
+      this.leaderboardRowMap.clear();
+      this.leaderboardBg = null;
+      return;
+    }
 
     const width = 240;
-
-    const bg = this.add.graphics();
-    bg.fillStyle(0x0a0a1e, 0.92);
-    bg.fillRoundedRect(0, 0, width, 36 + leaderboard.length * 40, 10);
-    bg.lineStyle(1.5, 0x00F0FF, 0.7);
-    bg.strokeRoundedRect(0, 0, width, 36 + leaderboard.length * 40, 10);
-    this.leaderboardContainer.add(bg);
-
-    const title = this.add.text(width / 2, 18, 'TOP 5 LEADERBOARD', {
-      fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: '13px',
-      color: '#00F0FF',
-      letterSpacing: 2
-    }).setOrigin(0.5);
-    this.leaderboardContainer.add(title);
-
     const rankColors = ['#FFE600', '#CCCCCC', '#CD7F32', '#FFFFFF', '#FFFFFF'];
 
-    leaderboard.forEach((player, idx) => {
-      const itemY = 44 + idx * 38;
-      const rankColor = rankColors[idx] || '#FFFFFF';
-
-      const pip = this.add.graphics();
-      const pColorNum = player.color ? player.color.num : (player.colorNum || 0x00f0ff);
-      pip.fillStyle(pColorNum, 1);
-      pip.fillCircle(14, itemY + 8, 6);
-      this.leaderboardContainer.add(pip);
-
-      const nameText = this.add.text(28, itemY + 8, `${idx + 1}. ${player.name}`, {
-        fontFamily: 'sans-serif',
-        fontSize: '12px',
-        fontStyle: 'bold',
-        color: rankColor
-      }).setOrigin(0, 0.5);
-
-      const scoreText = this.add.text(width - 10, itemY + 8, `${player.score}`, {
-        fontFamily: 'monospace',
+    if (!this.leaderboardBg) {
+      this.leaderboardBg = this.add.graphics();
+      this.leaderboardTitle = this.add.text(width / 2, 18, 'TOP 5 LEADERBOARD', {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
         fontSize: '13px',
-        fontStyle: 'bold',
-        color: '#39FF14'
-      }).setOrigin(1, 0.5);
+        color: '#00F0FF',
+        letterSpacing: 2
+      }).setOrigin(0.5);
+      this.leaderboardContainer.add([this.leaderboardBg, this.leaderboardTitle]);
+    }
 
-      this.leaderboardContainer.add([nameText, scoreText]);
+    const boxH = 36 + Math.max(1, leaderboard.length) * 40;
+    this.leaderboardBg.clear();
+    this.leaderboardBg.fillStyle(0x0a0a1e, 0.92);
+    this.leaderboardBg.fillRoundedRect(0, 0, width, boxH, 10);
+    this.leaderboardBg.lineStyle(1.5, 0x00F0FF, 0.7);
+    this.leaderboardBg.strokeRoundedRect(0, 0, width, boxH, 10);
 
+    const activeLeaderboardIds = new Set(leaderboard.map(p => p.id));
+
+    // Remove rows no longer in top 5
+    for (const [id, row] of this.leaderboardRowMap.entries()) {
+      if (!activeLeaderboardIds.has(id)) {
+        this.tweens.add({
+          targets: row.container,
+          alpha: 0,
+          duration: 200,
+          onComplete: () => {
+            row.container.destroy();
+            this.leaderboardRowMap.delete(id);
+          }
+        });
+      }
+    }
+
+    // Update or add rows with sliding tween
+    leaderboard.forEach((player, idx) => {
+      const targetY = 44 + idx * 38;
+      const rankColor = rankColors[idx] || '#FFFFFF';
+      const pColorNum = player.color ? player.color.num : (player.colorNum || 0x00f0ff);
+
+      let row = this.leaderboardRowMap.get(player.id);
+      if (!row) {
+        const rowContainer = this.add.container(0, targetY);
+        rowContainer.setAlpha(0);
+
+        const flashGfx = this.add.graphics();
+        rowContainer.add(flashGfx);
+
+        const pip = this.add.graphics();
+        pip.fillStyle(pColorNum, 1);
+        pip.fillCircle(14, 8, 6);
+        rowContainer.add(pip);
+
+        const nameText = this.add.text(28, 8, `${idx + 1}. ${player.name}`, {
+          fontFamily: 'sans-serif',
+          fontSize: '12px',
+          fontStyle: 'bold',
+          color: rankColor
+        }).setOrigin(0, 0.5);
+        rowContainer.add(nameText);
+
+        const scoreText = this.add.text(width - 10, 8, `${player.score}`, {
+          fontFamily: 'monospace',
+          fontSize: '13px',
+          fontStyle: 'bold',
+          color: '#39FF14'
+        }).setOrigin(1, 0.5);
+        rowContainer.add(scoreText);
+
+        this.leaderboardContainer.add(rowContainer);
+        this.tweens.add({
+          targets: rowContainer,
+          alpha: 1,
+          duration: 250
+        });
+
+        row = {
+          container: rowContainer,
+          pip,
+          nameText,
+          scoreText,
+          flashGfx,
+          rankIndex: idx
+        };
+        this.leaderboardRowMap.set(player.id, row);
+      } else {
+        // Row exists: check if rank changed
+        if (row.rankIndex !== idx) {
+          row.rankIndex = idx;
+          this.tweens.add({
+            targets: row.container,
+            y: targetY,
+            duration: 300,
+            ease: 'Cubic.easeOut'
+          });
+
+          // Flash highlight
+          row.flashGfx.clear();
+          row.flashGfx.fillStyle(0x00F0FF, 0.35);
+          row.flashGfx.fillRoundedRect(4, -4, width - 8, 24, 4);
+          this.tweens.add({
+            targets: row.flashGfx,
+            alpha: 0,
+            duration: 400,
+            onComplete: () => {
+              row.flashGfx.clear();
+              row.flashGfx.setAlpha(1);
+            }
+          });
+        }
+
+        row.nameText.setText(`${idx + 1}. ${player.name}`);
+        row.nameText.setColor(rankColor);
+        row.scoreText.setText(`${player.score}`);
+      }
+
+      // Update player entity rank & aura & top crown
       const entity = this.playerMap.get(player.id);
       if (entity) {
         entity.rank = idx + 1;
@@ -1630,6 +2230,9 @@ class HostScene extends Phaser.Scene {
           entity.aura.setVisible(idx < 3);
           const auraColors = [0xFFE600, 0xCCCCCC, 0xCD7F32];
           entity.auraColor = auraColors[idx] || 0xFFFFFF;
+        }
+        if (entity.topCrown) {
+          entity.topCrown.setVisible(idx === 0);
         }
       }
     });
@@ -2495,52 +3098,56 @@ class HostScene extends Phaser.Scene {
     const container = this.add.container((p.x || 800) + ox, p.y || 530);
     const radius = 24;
     const pColorNum = p.color ? p.color.num : (p.colorNum || 0x00f0ff);
+    const animalId = (p.animal && p.animal.id) || p.animalId || 'fox';
+    const textureKey = this.textures.exists(`animal_${animalId}`) ? `animal_${animalId}` : 'animal_fox';
 
     // Glowing Top 3 pulsing aura
     const aura = this.add.graphics();
     aura.lineStyle(3, 0xFFE600, 0.9);
-    aura.strokeCircle(0, 0, radius + 10);
+    aura.strokeCircle(0, 0, radius + 12);
     aura.setVisible(false);
 
+    // Player-color ambient glow
     const glow = this.add.graphics();
-    glow.fillStyle(pColorNum, 0.25);
-    glow.fillCircle(0, 0, radius + 8);
+    glow.fillStyle(pColorNum, 0.35);
+    glow.fillCircle(0, 0, radius + 6);
 
+    // Player-color outline ring
     const ring = this.add.graphics();
-    ring.lineStyle(3, pColorNum, 0.9);
-    ring.strokeCircle(0, 0, radius + 14);
-    ring.setVisible(false);
+    ring.lineStyle(3, pColorNum, 1);
+    ring.strokeCircle(0, 0, radius + 3);
 
-    const circle = this.add.graphics();
-    circle.fillStyle(pColorNum, 1);
-    circle.fillCircle(0, 0, radius);
-    circle.lineStyle(2, 0xFFFFFF, 0.8);
-    circle.strokeCircle(0, 0, radius);
+    // Retro 8-bit Pixel-Art Animal Avatar Sprite
+    const avatar = this.add.image(0, 0, textureKey).setDisplaySize(38, 38);
 
-    const core = this.add.graphics();
-    core.fillStyle(0xFFFFFF, 0.9);
-    core.fillCircle(0, 0, 6);
+    // #1 Player Top Crown Marker
+    const topCrown = this.add.text(0, -radius - 38, '👑', {
+      fontSize: '22px'
+    }).setOrigin(0.5).setVisible(false);
 
+    // Key holder badge
     const keyIcon = this.add.text(0, -radius - 30, '🔑', { fontSize: '14px' }).setOrigin(0.5).setVisible(false);
 
+    // Name tag with dark backing chip
     const nameTag = this.add.text(0, -radius - 14, p.name, {
       fontFamily: 'sans-serif',
-      fontSize: '14px',
+      fontSize: '13px',
       fontStyle: 'bold',
       color: '#FFFFFF',
-      backgroundColor: 'rgba(5, 5, 15, 0.75)',
-      padding: { x: 6, y: 2 }
+      backgroundColor: 'rgba(5, 5, 18, 0.92)',
+      padding: { x: 8, y: 3 }
     }).setOrigin(0.5);
 
-    container.add([aura, glow, ring, circle, core, keyIcon, nameTag]);
+    container.add([aura, glow, ring, avatar, topCrown, keyIcon, nameTag]);
     container.setDepth(10);
 
     this.playerMap.set(p.id, {
       container,
-      circle,
+      avatar,
       glow,
       ring,
       aura,
+      topCrown,
       auraColor: 0xFFE600,
       rank: 99,
       keyIcon,
@@ -2577,6 +3184,12 @@ class HostScene extends Phaser.Scene {
           entity.hasKey = Boolean(snap.hasKey !== undefined ? snap.hasKey : snap.k);
           if (entity.keyIcon) {
             entity.keyIcon.setVisible(entity.hasKey);
+          }
+          if (snap.animalId && entity.avatar) {
+            const tKey = `animal_${snap.animalId}`;
+            if (this.textures.exists(tKey) && entity.avatar.texture.key !== tKey) {
+              entity.avatar.setTexture(tKey);
+            }
           }
         }
       }
@@ -2738,6 +3351,11 @@ class HostScene extends Phaser.Scene {
           entity.aura.clear();
           entity.aura.lineStyle(3, entity.auraColor || 0xFFE600, 0.75 + Math.sin(time / 160) * 0.25);
           entity.aura.strokeCircle(0, 0, 34);
+        }
+
+        // Bob top crown
+        if (entity.topCrown && entity.topCrown.visible) {
+          entity.topCrown.setY(-38 + Math.sin(time / 200) * 3);
         }
 
         entity.ring.setVisible(entity.action);
