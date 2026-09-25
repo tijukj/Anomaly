@@ -215,6 +215,9 @@ export class GameManager {
 
   // --- Pre-Match Countdown Sequence ---
   startMatch() {
+    // Automatically approve and admit all pending players waiting in the lobby
+    this.approveAllJoins();
+
     const activePlayers = Array.from(this.players.values()).filter(p => p.connected);
     if (this.state !== CONFIG.STATES.LOBBY) return false;
     if (activePlayers.length < CONFIG.MIN_PLAYERS_TO_START) return false;
@@ -518,11 +521,26 @@ export class GameManager {
   }
 
   handlePlayerInput(socketId, inputData) {
-    const playerId = this.socketToPlayerId.get(socketId);
+    let playerId = (inputData && inputData.playerId) || this.socketToPlayerId.get(socketId);
+    if (!playerId) {
+      // Fallback: check if any player has this socketId
+      const p = Array.from(this.players.values()).find(pl => pl.socketId === socketId);
+      if (p) {
+        playerId = p.id;
+        this.socketToPlayerId.set(socketId, p.id);
+      }
+    }
     if (!playerId) return;
 
     const player = this.players.get(playerId);
     if (!player) return;
+
+    // Keep player's socketId and mapping up to date
+    if (player.socketId !== socketId) {
+      player.socketId = socketId;
+      this.socketToPlayerId.set(socketId, player.id);
+    }
+    player.connected = true;
 
     // Movement allowed only during RUNNING
     if (this.state !== CONFIG.STATES.RUNNING) {
@@ -574,12 +592,18 @@ export class GameManager {
     };
   }
 
-  // Join Request Gate (Host must approve before player joins/rejoins)
-  requestPlayerJoin(socket, { playerId, name }) {
+  // Join Request Gate (Host can approve, bots & rejoins fast-tracked)
+  requestPlayerJoin(socket, { playerId, name, isBot }) {
     const sanitizedName = (name || 'RACER').trim().slice(0, CONFIG.MAX_NAME_LENGTH) || 'RACER';
     const isRejoin = Boolean(playerId && this.players.has(playerId));
-    const requestId = 'req_' + Math.random().toString(36).substring(2, 9);
 
+    // Fast-path: Bots and Rejoining racers immediately connect without blocking
+    if (isBot || isRejoin) {
+      this.registerOrReconnectPlayer(socket, { playerId, name: sanitizedName });
+      return;
+    }
+
+    const requestId = 'req_' + Math.random().toString(36).substring(2, 9);
     const pendingEntry = {
       requestId,
       socketId: socket.id,

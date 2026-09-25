@@ -47,7 +47,7 @@ class SimulatedBot {
 
     this.socket.on('connect', () => {
       console.log(`[Bot ${this.index + 1}] Connected -> Joining as "${this.name}"`);
-      this.socket.emit('join_game', { name: this.name });
+      this.socket.emit('join_game', { name: this.name, isBot: true });
     });
 
     this.socket.on('joined_success', (data) => {
@@ -77,7 +77,14 @@ class SimulatedBot {
     // 20Hz Input loop
     this.timer = setInterval(() => {
       this.updateAI();
-      this.socket.emit('player_input', this.currentInput);
+      if (this.playerId) {
+        this.socket.emit('player_input', {
+          playerId: this.playerId,
+          x: this.currentInput.x,
+          y: this.currentInput.y,
+          action: this.currentInput.action
+        });
+      }
     }, CONFIG.TICK_INTERVAL_MS);
   }
 

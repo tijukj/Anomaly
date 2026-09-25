@@ -858,14 +858,13 @@ class HostScene extends Phaser.Scene {
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.spaceKey.on('down', () => {
       if (this.pendingRequests.length > 0) {
-        this.approveNextJoinRequest();
-      } else {
-        this.triggerStartMatch();
+        this.approveAllJoinRequests();
       }
+      this.triggerStartMatch();
     });
 
     this.aKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.aKey.on('down', () => this.approveNextJoinRequest());
+    this.aKey.on('down', () => this.approveAllJoinRequests());
 
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.escKey.on('down', () => {

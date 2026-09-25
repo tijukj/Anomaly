@@ -297,7 +297,12 @@ function transmitInputIfChanged(force = false) {
   const isUrgent = force || actionChanged || deltaX > 0.08 || deltaY > 0.08;
 
   if (isUrgent || (hasChanged && (now - lastTransmitTime >= TRANSMIT_INTERVAL_MS)) || heartbeatExpired) {
-    socket.emit('player_input', currentInput);
+    socket.emit('player_input', {
+      playerId: localPlayer.id,
+      x: currentInput.x,
+      y: currentInput.y,
+      action: currentInput.action
+    });
     lastSentInput = { ...currentInput };
     lastSendTimestamp = now;
     lastTransmitTime = now;
