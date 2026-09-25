@@ -239,6 +239,16 @@ export const CONFIG = {
     CLUE_SLOT_FADE_DURATION_MS: 400
   },
 
+  // Competitive Tension, Steals, Near-Miss & Rivalry Tunables
+  COMPETITIVE: {
+    CONTESTED_RADIUS: 75, // Distance (px) within which players contest high-value loot
+    CONTESTED_COOLDOWN_MS: 3500, // Debounce time between broadcasting contested events
+    NEAR_MISS_WINDOW_MS: 1000, // 1.0 second window for second racer to trigger "SO CLOSE"
+    NEAR_MISS_RADIUS: 65, // Proximity to claimed loot to trigger near-miss toast
+    NEAR_MISS_DISPLAY_MS: 2000, // Host screen near-miss toast display duration
+    RIVALRY_STEAL_THRESHOLD: 2 // Number of cross-steals each required to establish a rivalry
+  },
+
   // Game States
   STATES: {
     LOBBY: 'LOBBY',

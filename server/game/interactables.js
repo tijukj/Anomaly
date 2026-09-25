@@ -25,6 +25,8 @@ export class InteractableManager {
     this.rng = createRng(12345);
     this.activeGlitch = null;
     this.nextGlitchSpawnAt = 0;
+    this.recentClaims = new Map(); // claimId -> { winnerId, winnerName, targetName, x, y, claimedAt, notifiedPlayers }
+    this.lastContestAlertTime = new Map(); // entityId -> lastAlertTimestamp
   }
 
   // Pick treasure tier based on current match phase spawn table
@@ -46,6 +48,8 @@ export class InteractableManager {
 
   initForMatch(seed, seededPois, initialPhase) {
     this.entities.clear();
+    this.recentClaims.clear();
+    this.lastContestAlertTime.clear();
     this.rng = createRng(seed);
     this.activeGlitch = null;
     this.nextGlitchSpawnAt = Date.now() + 15000; // First glitch appears 15s after match start
@@ -196,10 +200,128 @@ export class InteractableManager {
     // 2. Process Transient Glitch / Anomaly Treasure Lifecycle
     this.tickGlitchTreasure(now);
 
-    // 3. Compute Smart Action Button & Process Interactions per player
+    // 3. Process Contested High-Value Loot (Rare, Epic, Glitch, Vault, Legendary)
+    this.tickContestedLoot(now, activePlayers);
+
+    // 4. Process Near-Misses on Recently Claimed Loot
+    this.tickNearMisses(now, activePlayers);
+
+    // 5. Compute Smart Action Button & Process Interactions per player
     for (const player of activePlayers) {
       this.processPlayerInteractions(player, now);
     }
+  }
+
+  tickContestedLoot(now, activePlayers) {
+    const contestedRadius = CONFIG.COMPETITIVE.CONTESTED_RADIUS || 75;
+    const alertCooldown = CONFIG.COMPETITIVE.CONTESTED_COOLDOWN_MS || 3500;
+
+    const allInteractables = [
+      ...Array.from(this.entities.values()),
+      ...(this.gameManager.clues ? this.gameManager.clues.getActiveEntities() : [])
+    ];
+
+    for (const ent of allInteractables) {
+      if (ent.state !== 'active' && ent.state !== 'revealed') {
+        ent.contested = null;
+        continue;
+      }
+
+      // Only high-value loot triggers contested tension
+      const isHighValue = (ent.type === 'treasure' && (ent.tier === 'rare' || ent.tier === 'epic')) ||
+                          ent.type === 'glitch' ||
+                          ent.type === 'vault' ||
+                          ent.type === 'legendary_vault';
+
+      if (!isHighValue) {
+        ent.contested = null;
+        continue;
+      }
+
+      const nearbyPlayers = [];
+      for (const p of activePlayers) {
+        const dist = Math.hypot(p.x - ent.x, p.y - ent.y);
+        if (dist <= contestedRadius) {
+          nearbyPlayers.push(p);
+        }
+      }
+
+      if (nearbyPlayers.length >= 2) {
+        ent.contested = {
+          names: nearbyPlayers.map(p => p.name),
+          playerIds: nearbyPlayers.map(p => p.id),
+          count: nearbyPlayers.length
+        };
+
+        const lastAlert = this.lastContestAlertTime.get(ent.id) || 0;
+        if (now - lastAlert >= alertCooldown) {
+          this.lastContestAlertTime.set(ent.id, now);
+          const targetName = ent.name || (ent.tier ? `${ent.tier.toUpperCase()} TREASURE` : ent.type.toUpperCase());
+          const racersStr = `${nearbyPlayers[0].name} & ${nearbyPlayers[1].name}${nearbyPlayers.length > 2 ? ` (+${nearbyPlayers.length - 2})` : ''}`;
+
+          this.gameManager.io.emit('host_event', {
+            id: Math.random().toString(36).substring(2, 9),
+            type: 'contested',
+            text: `⚔️ CONTESTED! ${racersStr} racing for ${targetName}!`,
+            colorHex: '#FF0055',
+            timestamp: now
+          });
+        }
+      } else {
+        ent.contested = null;
+      }
+    }
+  }
+
+  tickNearMisses(now, activePlayers) {
+    const windowMs = CONFIG.COMPETITIVE.NEAR_MISS_WINDOW_MS || 1000;
+    const missRadius = CONFIG.COMPETITIVE.NEAR_MISS_RADIUS || 65;
+    const displayMs = CONFIG.COMPETITIVE.NEAR_MISS_DISPLAY_MS || 2000;
+
+    for (const [claimId, claim] of this.recentClaims.entries()) {
+      if (now - claim.claimedAt > windowMs) {
+        this.recentClaims.delete(claimId);
+        continue;
+      }
+
+      for (const player of activePlayers) {
+        if (player.id === claim.winnerId) continue;
+        if (claim.notifiedPlayers.has(player.id)) continue;
+
+        const dist = Math.hypot(player.x - claim.x, player.y - claim.y);
+        if (dist <= missRadius) {
+          claim.notifiedPlayers.add(player.id);
+
+          // Emit Near-Miss Floating Toast for Host Screen
+          this.gameManager.io.emit('near_miss_toast', {
+            winnerName: claim.winnerName,
+            runnerUpName: player.name,
+            runnerUpColorHex: player.color ? player.color.hex : '#00F0FF',
+            targetName: claim.targetName,
+            x: claim.x,
+            y: claim.y,
+            durationMs: displayMs
+          });
+
+          // Log in Host Live Feed
+          this.gameManager.io.emit('host_event', {
+            id: Math.random().toString(36).substring(2, 9),
+            type: 'near_miss',
+            text: `⚡ SO CLOSE! ${player.name} missed the ${claim.targetName} by a fraction of a second!`,
+            colorHex: '#FFE600',
+            timestamp: now
+          });
+        }
+      }
+    }
+  }
+
+  recordClaim(entId, claimData) {
+    this.recentClaims.set(entId, {
+      ...claimData,
+      claimedAt: claimData.claimedAt || Date.now(),
+      notifiedPlayers: claimData.notifiedPlayers || new Set()
+    });
   }
 
   tickGlitchTreasure(now) {
@@ -412,6 +534,13 @@ export class InteractableManager {
         ent.state = 'collected';
         ent.respawnAt = now + CONFIG.SCORING.TREASURE_RESPAWN_MS;
         this.scoring.awardPoints(player, ent.points, `${ent.tier.toUpperCase()} TREASURE`, { x: ent.x, y: ent.y });
+        this.recordClaim(ent.id, {
+          winnerId: player.id,
+          winnerName: player.name,
+          targetName: `${ent.tier.toUpperCase()} TREASURE`,
+          x: ent.x,
+          y: ent.y
+        });
         
         if (this.gameManager.statsTracker) {
           this.gameManager.statsTracker.recordTreasure(player, ent.tier, false);
@@ -426,6 +555,13 @@ export class InteractableManager {
       case 'glitch':
         ent.state = 'collected';
         this.scoring.awardPoints(player, ent.points, 'GLITCH TREASURE', { x: ent.x, y: ent.y });
+        this.recordClaim(ent.id, {
+          winnerId: player.id,
+          winnerName: player.name,
+          targetName: 'GLITCH TREASURE',
+          x: ent.x,
+          y: ent.y
+        });
         
         if (this.gameManager.statsTracker) {
           this.gameManager.statsTracker.recordTreasure(player, 'glitch', true);
@@ -456,6 +592,13 @@ export class InteractableManager {
             ent.holdingPlayers.clear();
             const reward = this.rng.rangeInt(CONFIG.SCORING.CHEST_MIN, CONFIG.SCORING.CHEST_MAX);
             this.scoring.awardPoints(player, reward, 'SECRET CHEST', { x: ent.x, y: ent.y });
+            this.recordClaim(ent.id, {
+              winnerId: player.id,
+              winnerName: player.name,
+              targetName: 'SECRET CHEST',
+              x: ent.x,
+              y: ent.y
+            });
 
             if (this.gameManager.statsTracker) {
               this.gameManager.statsTracker.recordChest(player);
@@ -473,6 +616,13 @@ export class InteractableManager {
         ent.state = 'collected';
         player.hasKey = true;
         this.scoring.awardPoints(player, 5, 'VAULT KEY FOUND', { x: ent.x, y: ent.y });
+        this.recordClaim(ent.id, {
+          winnerId: player.id,
+          winnerName: player.name,
+          targetName: 'CITADEL KEY',
+          x: ent.x,
+          y: ent.y
+        });
         
         this.gameManager.io.emit('host_event', {
           id: Math.random().toString(36).substring(2, 9),
@@ -488,6 +638,13 @@ export class InteractableManager {
           ent.state = 'opened';
           player.hasKey = false;
           this.scoring.awardPoints(player, CONFIG.SCORING.VAULT, 'VAULT UNLOCKED', { x: ent.x, y: ent.y });
+          this.recordClaim(ent.id, {
+            winnerId: player.id,
+            winnerName: player.name,
+            targetName: ent.name || 'ANCIENT VAULT',
+            x: ent.x,
+            y: ent.y
+          });
 
           if (this.gameManager.statsTracker) {
             this.gameManager.statsTracker.recordVault(player);
@@ -559,6 +716,7 @@ export class InteractableManager {
       id: e.id,
       type: e.type,
       tier: e.tier,
+      name: e.name,
       x: e.x,
       y: e.y,
       radius: e.radius,
@@ -568,10 +726,14 @@ export class InteractableManager {
       state: e.state,
       spawnedAt: e.spawnedAt,
       expiresAt: e.expiresAt,
-      durationSec: e.durationSec
+      durationSec: e.durationSec,
+      contested: e.contested || null
     }));
 
-    const clues = this.gameManager.clues ? this.gameManager.clues.getActiveEntities() : [];
+    const clues = (this.gameManager.clues ? this.gameManager.clues.getActiveEntities() : []).map(c => ({
+      ...c,
+      contested: c.contested || null
+    }));
     return [...standard, ...clues];
   }
 }

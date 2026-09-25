@@ -388,6 +388,9 @@ export class AnomalyManager {
             if (this.gameManager && this.gameManager.statsTracker) {
               this.gameManager.statsTracker.recordAnomalyAction(p, 5);
             }
+            if (this.gameManager && typeof this.gameManager.recordCrownSteal === 'function') {
+              this.gameManager.recordCrownSteal(p, holder, now);
+            }
             this.gameManager.io.emit('host_event', {
               id: Math.random().toString(36).substring(2, 9),
               type: 'crown_stolen',

@@ -367,77 +367,91 @@ html, body {
   width: 100%;
   flex: 1;
   display: flex;
-  gap: 10px;
   position: relative;
   touch-action: none;
-  min-height: 200px;
+  min-height: 240px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: rgba(12, 12, 28, 0.7);
+  border: 1.5px solid rgba(0, 240, 255, 0.25);
 }
 
 .touch-zone {
   flex: 1;
   height: 100%;
-  border-radius: 20px;
-  background: rgba(14, 14, 32, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
   position: relative;
   overflow: hidden;
+  touch-action: none;
+}
+
+.full-joystick-zone {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: none;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   touch-action: none;
 }
 
-.left-zone {
-  border-color: rgba(0, 240, 255, 0.2);
-}
-
-.right-zone {
-  border-color: rgba(255, 0, 85, 0.2);
-  padding: 10px;
-}
-
 .zone-hint {
   position: absolute;
-  bottom: 12px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 1px;
+  bottom: 16px;
+  left: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
   color: #555577;
   pointer-events: none;
-  text-align: center;
+  text-align: left;
 }
 
-/* Floating Joystick Elements */
+/* Larger Floating Joystick Elements */
 .joystick-base {
   position: absolute;
-  width: 120px;
-  height: 120px;
+  width: 150px;
+  height: 150px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(0, 240, 255, 0.15) 0%, rgba(5, 5, 20, 0.6) 80%);
-  border: 2px solid var(--player-theme-color);
-  box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+  background: radial-gradient(circle, rgba(0, 240, 255, 0.18) 0%, rgba(5, 5, 20, 0.75) 80%);
+  border: 2.5px solid var(--player-theme-color);
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.25);
   display: none;
   transform: translate(-50%, -50%);
   pointer-events: none;
+  z-index: 10;
 }
 
 .joystick-knob {
   position: absolute;
-  width: 52px;
-  height: 52px;
+  width: 66px;
+  height: 66px;
   border-radius: 50%;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   background: radial-gradient(circle at 35% 35%, #ffffff 0%, var(--player-theme-color) 80%);
-  box-shadow: 0 0 15px var(--player-theme-color);
+  box-shadow: 0 0 18px var(--player-theme-color);
+}
+
+/* Bottom-Right Thumb Action Button Container */
+.action-btn-container {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  pointer-events: auto;
 }
 
 /* Smart Contextual Action Button */
 .action-btn {
-  width: 100%;
-  max-width: 155px;
-  aspect-ratio: 1 / 1;
+  width: 96px;
+  height: 96px;
   border-radius: 50%;
   background: radial-gradient(circle at 35% 35%, var(--action-btn-color, #ff0055) 0%, #3a0015 100%);
   border: 3px solid #ffffff;

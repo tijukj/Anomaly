@@ -31,6 +31,9 @@ export class GameManager {
     this.missions = new MissionManager(this, this.scoring);
     this.anomalies = new AnomalyManager(this, this.scoring);
     this.sentinels = new HazardSentinelManager(this, this.scoring);
+    this.crownStealCounts = new Map(); // "thiefId->victimId" -> count
+    this.rivalPlayerIds = new Set(); // Set of playerIds involved in active rivalries
+    this.rivalries = new Map(); // pairKey -> rivalryData
 
     // Lifecycle & Timeline
     this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
@@ -60,6 +63,9 @@ export class GameManager {
     this.secretDoorOpen = false;
     this.activeWalls = [...STATIC_WALLS, SECRET_PASSAGE_WALL];
     this.discoveredRegions.clear();
+    this.crownStealCounts.clear();
+    this.rivalPlayerIds.clear();
+    this.rivalries.clear();
     this.currentPhaseIndex = 0;
     this.currentPhase = CONFIG.PHASES[0];
     this.totalMatchDurationSec = CONFIG.DEBUG_SHORT_MATCH ? CONFIG.SHORT_MATCH_DURATION_SEC : CONFIG.STANDARD_MATCH_DURATION_SEC;
@@ -805,6 +811,42 @@ export class GameManager {
     this.io.emit('game_state_update', this.getPublicState());
   }
 
+  recordCrownSteal(thief, victim, now) {
+    if (!thief || !victim || thief.id === victim.id) return;
+    const stealKey = `${thief.id}->${victim.id}`;
+    const reverseKey = `${victim.id}->${thief.id}`;
+    const newCount = (this.crownStealCounts.get(stealKey) || 0) + 1;
+    this.crownStealCounts.set(stealKey, newCount);
+
+    const reverseCount = this.crownStealCounts.get(reverseKey) || 0;
+    const threshold = (CONFIG.COMPETITIVE && CONFIG.COMPETITIVE.RIVALRY_STEAL_THRESHOLD) || 2;
+
+    if (newCount >= threshold && reverseCount >= threshold) {
+      const pairKey = [thief.id, victim.id].sort().join(':');
+      if (!this.rivalries.has(pairKey)) {
+        this.rivalries.set(pairKey, {
+          player1Id: thief.id,
+          player2Id: victim.id,
+          player1Name: thief.name,
+          player2Name: victim.name,
+          stealsA: newCount,
+          stealsB: reverseCount,
+          formedAt: now
+        });
+        this.rivalPlayerIds.add(thief.id);
+        this.rivalPlayerIds.add(victim.id);
+
+        this.io.emit('host_event', {
+          id: Math.random().toString(36).substring(2, 9),
+          type: 'rivalry_ignited',
+          text: `⚔️ RIVALRY FORMED! ${thief.name} and ${victim.name} have traded the Crown ${threshold}+ times!`,
+          colorHex: '#FF0055',
+          timestamp: now
+        });
+      }
+    }
+  }
+
   broadcastSnapshot(leaderboard) {
     const activePlayers = Array.from(this.players.values())
       .filter(p => p.connected)
@@ -819,8 +861,14 @@ export class GameManager {
         vx: Math.round(p.vx),
         vy: Math.round(p.vy),
         score: p.score || 0,
-        hasKey: Boolean(p.hasKey)
+        hasKey: Boolean(p.hasKey),
+        isRival: this.rivalPlayerIds.has(p.id)
       }));
+
+    const enrichedLeaderboard = (leaderboard || []).slice(0, 5).map(lb => ({
+      ...lb,
+      isRival: this.rivalPlayerIds.has(lb.id)
+    }));
 
     const snapshot = {
       t: Date.now(),
@@ -830,7 +878,7 @@ export class GameManager {
       sd: this.secretDoorOpen,
       p: activePlayers,
       e: this.interactables.getVisibleEntities(),
-      lb: leaderboard.slice(0, 5), // Top 5 leaderboard for host HUD
+      lb: enrichedLeaderboard,
       clues: this.clues ? this.clues.getPublicClueState() : null,
       anomalies: this.anomalies ? this.anomalies.getActiveState() : null,
       sentinels: this.sentinels ? this.sentinels.getActiveSentinels() : []

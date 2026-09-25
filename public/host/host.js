@@ -979,6 +979,13 @@ class HostScene extends Phaser.Scene {
       }
     });
 
+    // Socket Event: Near-Miss Toast (Racer narrowly missed claimed treasure)
+    socket.on('near_miss_toast', (data) => {
+      if (currentGameState.state === 'RUNNING') {
+        this.showNearMissToast(data);
+      }
+    });
+
     // Socket Event: Public Clue Discovered (Large 6-second host banner)
     socket.on('public_clue_found', (data) => {
       this.showPublicClueBanner(data);
@@ -1554,6 +1561,57 @@ class HostScene extends Phaser.Scene {
     });
   }
 
+  // Floating Animated Near-Miss Toast ("⚡ SO CLOSE, <NAME>!")
+  showNearMissToast(data) {
+    const ox = ARENA_OFFSET_X;
+    const tx = (data.x || 800) + ox;
+    const ty = (data.y || 530) - 34;
+
+    const toast = this.add.container(tx, ty);
+    const textStr = `⚡ SO CLOSE, ${(data.runnerUpName || 'RACER').toUpperCase()}! ⚡`;
+    const toastW = Math.max(180, textStr.length * 9.5);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1a0528, 0.95);
+    bg.fillRoundedRect(-toastW / 2, -15, toastW, 30, 8);
+    bg.lineStyle(2, 0xFFE600, 1);
+    bg.strokeRoundedRect(-toastW / 2, -15, toastW, 30, 8);
+
+    const txt = this.add.text(0, 0, textStr, {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '13px',
+      color: '#FFE600',
+      letterSpacing: 1
+    }).setOrigin(0.5);
+
+    toast.add([bg, txt]);
+    toast.setDepth(180);
+    toast.setScale(0.7);
+    toast.setAlpha(0);
+
+    this.tweens.add({
+      targets: toast,
+      scaleX: 1,
+      scaleY: 1,
+      alpha: 1,
+      y: ty - 14,
+      duration: 250,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(data.durationMs || 2000, () => {
+          this.tweens.add({
+            targets: toast,
+            alpha: 0,
+            y: ty - 34,
+            duration: 300,
+            ease: 'Cubic.easeIn',
+            onComplete: () => toast.destroy()
+          });
+        });
+      }
+    });
+  }
+
   triggerStartMatch() {
     if (currentGameState.state === 'LOBBY' && currentGameState.canStart) {
       socket.emit('start_match');
@@ -1943,8 +2001,13 @@ class HostScene extends Phaser.Scene {
     this.interactablesGraphics.clear();
     if (!entities) return;
 
+    if (!this.contestedTagMap) {
+      this.contestedTagMap = new Map();
+    }
+
     const ox = ARENA_OFFSET_X;
     const activeIds = new Set();
+    const activeContestedIds = new Set();
 
     for (const ent of entities) {
       if (ent.state !== 'active' && ent.state !== 'revealed') continue;
@@ -1952,6 +2015,36 @@ class HostScene extends Phaser.Scene {
 
       const ex = ent.x + ox;
       const ey = ent.y;
+
+      // Render Contested Indicator if 2+ racers are near high-value loot
+      if (ent.contested && ent.contested.names && ent.contested.names.length >= 2) {
+        activeContestedIds.add(ent.id);
+        const t = this.time ? this.time.now : Date.now();
+        const pulse = 1 + Math.sin(t / 110) * 0.22;
+
+        this.interactablesGraphics.lineStyle(3.5, 0xFF0055, 0.95);
+        this.interactablesGraphics.strokeCircle(ex, ey, 24 * pulse);
+        this.interactablesGraphics.lineStyle(2, 0xFFE600, 0.9);
+        this.interactablesGraphics.strokeCircle(ex, ey, 31 * pulse);
+
+        const racersText = `❗ ${ent.contested.names.slice(0, 2).join(' vs ')}`;
+        let tag = this.contestedTagMap.get(ent.id);
+        if (!tag) {
+          tag = this.add.text(ex, ey - 32, racersText, {
+            fontFamily: 'sans-serif',
+            fontSize: '11px',
+            fontStyle: 'bold',
+            color: '#FFE600',
+            backgroundColor: 'rgba(25, 5, 20, 0.94)',
+            padding: { x: 7, y: 3 }
+          }).setOrigin(0.5).setDepth(45);
+          this.contestedTagMap.set(ent.id, tag);
+        } else {
+          tag.setPosition(ex, ey - 32);
+          tag.setText(racersText);
+          tag.setVisible(true);
+        }
+      }
 
       if (ent.type === 'treasure') {
         const tier = ent.tier || 'common';
@@ -2062,6 +2155,16 @@ class HostScene extends Phaser.Scene {
         this.interactableSpriteMap.delete(id);
       }
     }
+
+    // Clean up inactive contested tags
+    if (this.contestedTagMap) {
+      for (const [id, tag] of this.contestedTagMap.entries()) {
+        if (!activeContestedIds.has(id)) {
+          tag.destroy();
+          this.contestedTagMap.delete(id);
+        }
+      }
+    }
   }
 
   // Draw Roaming Hazard Sentinels (Deduct points on touch)
@@ -2155,7 +2258,8 @@ class HostScene extends Phaser.Scene {
         pip.fillCircle(14, 8, 6);
         rowContainer.add(pip);
 
-        const nameText = this.add.text(28, 8, `${idx + 1}. ${player.name}`, {
+        const rivalSuffix = player.isRival ? ' ⚔️' : '';
+        const nameText = this.add.text(28, 8, `${idx + 1}. ${player.name}${rivalSuffix}`, {
           fontFamily: 'sans-serif',
           fontSize: '12px',
           fontStyle: 'bold',
@@ -2213,7 +2317,8 @@ class HostScene extends Phaser.Scene {
           });
         }
 
-        row.nameText.setText(`${idx + 1}. ${player.name}`);
+        const rivalSuffix = player.isRival ? ' ⚔️' : '';
+        row.nameText.setText(`${idx + 1}. ${player.name}${rivalSuffix}`);
         row.nameText.setColor(rankColor);
         row.scoreText.setText(`${player.score}`);
       }
@@ -3127,6 +3232,16 @@ class HostScene extends Phaser.Scene {
     // Key holder badge
     const keyIcon = this.add.text(0, -radius - 30, '🔑', { fontSize: '14px' }).setOrigin(0.5).setVisible(false);
 
+    // Rivalry indicator badge
+    const rivalTag = this.add.text(0, -radius - 28, '⚔️ RIVALRY', {
+      fontFamily: 'sans-serif',
+      fontSize: '9px',
+      fontStyle: 'bold',
+      color: '#FF0055',
+      backgroundColor: 'rgba(5, 5, 20, 0.94)',
+      padding: { x: 5, y: 1 }
+    }).setOrigin(0.5).setVisible(Boolean(p.isRival));
+
     // Name tag with dark backing chip
     const nameTag = this.add.text(0, -radius - 14, p.name, {
       fontFamily: 'sans-serif',
@@ -3137,7 +3252,7 @@ class HostScene extends Phaser.Scene {
       padding: { x: 8, y: 3 }
     }).setOrigin(0.5);
 
-    container.add([aura, glow, ring, avatar, topCrown, keyIcon, nameTag]);
+    container.add([aura, glow, ring, avatar, topCrown, keyIcon, rivalTag, nameTag]);
     container.setDepth(10);
 
     this.playerMap.set(p.id, {
@@ -3150,6 +3265,7 @@ class HostScene extends Phaser.Scene {
       auraColor: 0xFFE600,
       rank: 99,
       keyIcon,
+      rivalTag,
       labelText: nameTag,
       targetX: p.x || 800,
       targetY: p.y || 530,
@@ -3157,6 +3273,7 @@ class HostScene extends Phaser.Scene {
       currentY: p.y || 530,
       score: 0,
       hasKey: false,
+      isRival: Boolean(p.isRival),
       action: false,
       color: p.color
     });
@@ -3181,8 +3298,12 @@ class HostScene extends Phaser.Scene {
           entity.action = Boolean(snap.a);
           entity.score = snap.score !== undefined ? snap.score : (snap.s || 0);
           entity.hasKey = Boolean(snap.hasKey !== undefined ? snap.hasKey : snap.k);
+          entity.isRival = Boolean(snap.isRival);
           if (entity.keyIcon) {
             entity.keyIcon.setVisible(entity.hasKey);
+          }
+          if (entity.rivalTag) {
+            entity.rivalTag.setVisible(entity.isRival && !entity.hasKey);
           }
           if (snap.animalId && entity.avatar) {
             const tKey = `animal_${snap.animalId}`;

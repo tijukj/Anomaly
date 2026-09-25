@@ -54,7 +54,7 @@ let currentGameState = 'LOBBY';
 let lastKnownScore = 0;
 
 // Input State
-const MAX_JOYSTICK_RADIUS = 50;
+const MAX_JOYSTICK_RADIUS = 65;
 let joystickActive = false;
 let joystickTouchId = null;
 let joystickCenterX = 0;
@@ -258,6 +258,7 @@ function triggerHaptic(duration = 40) {
 
 actionBtn.addEventListener('pointerdown', (e) => {
   e.preventDefault();
+  e.stopPropagation();
   actionBtn.classList.add('pressed');
   currentInput.action = true;
   triggerHaptic(50);
@@ -265,6 +266,8 @@ actionBtn.addEventListener('pointerdown', (e) => {
 });
 
 const releaseAction = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
   if (currentInput.action) {
     actionBtn.classList.remove('pressed');
     currentInput.action = false;
