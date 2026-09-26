@@ -96,59 +96,53 @@ fetch('/api/server-info')
   });
 function drawStarPolygon(gfx, cx, cy, spikes, outerRadius, innerRadius, fillColor, strokeColor, strokeWidth = 2) {
   let rot = (Math.PI / 2) * 3;
-  let x = cx;
-  let y = cy;
   const step = Math.PI / spikes;
+  const points = [];
+
+  for (let i = 0; i < spikes; i++) {
+    points.push({
+      x: cx + Math.cos(rot) * outerRadius,
+      y: cy + Math.sin(rot) * outerRadius
+    });
+    rot += step;
+
+    points.push({
+      x: cx + Math.cos(rot) * innerRadius,
+      y: cy + Math.sin(rot) * innerRadius
+    });
+    rot += step;
+  }
 
   if (fillColor !== null && fillColor !== undefined) {
     gfx.fillStyle(fillColor, 1);
+    gfx.fillPoints(points, true, true);
   }
   if (strokeColor !== null && strokeColor !== undefined) {
     gfx.lineStyle(strokeWidth, strokeColor, 1);
+    gfx.strokePoints(points, true, true);
   }
-
-  gfx.beginPath();
-  gfx.moveTo(cx, cy - outerRadius);
-  for (let i = 0; i < spikes; i++) {
-    x = cx + Math.cos(rot) * outerRadius;
-    y = cy + Math.sin(rot) * outerRadius;
-    gfx.lineTo(x, y);
-    rot += step;
-
-    x = cx + Math.cos(rot) * innerRadius;
-    y = cy + Math.sin(rot) * innerRadius;
-    gfx.lineTo(x, y);
-    rot += step;
-  }
-  gfx.lineTo(cx, cy - outerRadius);
-  gfx.closePath();
-  if (fillColor !== null && fillColor !== undefined) gfx.fillPath();
-  if (strokeColor !== null && strokeColor !== undefined) gfx.strokePath();
 }
 
 function drawPolygon(gfx, cx, cy, sides, radius, fillColor, strokeColor, strokeWidth = 2, rotation = 0) {
+  const angleStep = (Math.PI * 2) / sides;
+  const points = [];
+
+  for (let i = 0; i < sides; i++) {
+    const angle = i * angleStep + rotation;
+    points.push({
+      x: cx + Math.cos(angle) * radius,
+      y: cy + Math.sin(angle) * radius
+    });
+  }
+
   if (fillColor !== null && fillColor !== undefined) {
     gfx.fillStyle(fillColor, 1);
+    gfx.fillPoints(points, true, true);
   }
   if (strokeColor !== null && strokeColor !== undefined) {
     gfx.lineStyle(strokeWidth, strokeColor, 1);
+    gfx.strokePoints(points, true, true);
   }
-
-  const angleStep = (Math.PI * 2) / sides;
-  gfx.beginPath();
-  for (let i = 0; i < sides; i++) {
-    const angle = i * angleStep + rotation;
-    const px = cx + Math.cos(angle) * radius;
-    const py = cy + Math.sin(angle) * radius;
-    if (i === 0) {
-      gfx.moveTo(px, py);
-    } else {
-      gfx.lineTo(px, py);
-    }
-  }
-  gfx.closePath();
-  if (fillColor !== null && fillColor !== undefined) gfx.fillPath();
-  if (strokeColor !== null && strokeColor !== undefined) gfx.strokePath();
 }
 
 function formatTime(totalSeconds) {
