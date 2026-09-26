@@ -667,7 +667,7 @@ export class InteractableManager {
           player.vx = 0;
           player.vy = 0;
           player.portalCooldownUntil = now + (CONFIG.SCORING.PORTAL_COOLDOWN_SEC * 1000);
-          this.scoring.awardPoints(player, 5, 'PORTAL WARP', { x: player.x, y: player.y });
+          this.scoring.awardPoints(player, CONFIG.SCORING.PORTAL_HOP || 5, 'PORTAL WARP', { x: player.x, y: player.y });
 
           if (this.gameManager.statsTracker) {
             this.gameManager.statsTracker.recordPortal(player);
