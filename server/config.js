@@ -68,7 +68,16 @@ export const CONFIG = {
     FRICTION: 0.85, // Velocity damping factor per tick
     PLAYER_RADIUS: 24, // Collision & render radius
     RIVER_SPEED_MULTIPLIER: 0.55, // Speed multiplier when wading in water without bridge
-    PLAYER_PUSH_FORCE: 0.5 // Soft body-blocking push factor between players
+    PLAYER_PUSH_FORCE: 0.35, // Soft body-blocking push factor between players
+    MAX_PUSH_PER_TICK: 6.0, // Maximum displacement from player collisions per tick (prevents corner launching)
+    BOUNDS: {
+      MIN_X: 62, // Clean clearance from 16px boundary wall (20..36) + radius 24
+      MAX_X: 1538, // Clean clearance from right boundary wall (1564..1580) - radius 24
+      MIN_Y: 62, // Clean clearance from top boundary wall (20..36) + radius 24
+      MAX_Y: 938 // Clean clearance from bottom boundary wall (964..980) - radius 24
+    },
+    ANTI_STUCK_THRESHOLD_SEC: 3.0, // Trigger anti-stuck safety net if stationary for 3s with active input
+    ANTI_STUCK_NUDGE_DIST: 50 // Distance in pixels to gently relocate stuck player
   },
 
   // Player Settings

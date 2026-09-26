@@ -141,8 +141,6 @@ export class GameManager {
         this.endMatch();
       }
 
-      const activePlayerList = Array.from(this.players.values()).filter(p => p.connected);
-
       // 2. Authoritative physics & collisions
       for (const player of activePlayerList) {
         this.updatePlayerMovement(player, dt);
@@ -150,9 +148,20 @@ export class GameManager {
 
       for (const player of activePlayerList) {
         this.resolveWallCollisions(player);
+        this.clampPlayerToBounds(player);
       }
 
       this.resolvePlayerCollisions(activePlayerList);
+
+      // Post-push secondary resolution & boundary clamp (guarantees no player is embedded in walls or corners)
+      for (const player of activePlayerList) {
+        this.resolveWallCollisions(player);
+        this.clampPlayerToBounds(player);
+      }
+
+      // Anti-Stuck Safety Net
+      this.checkAndResolveStuckPlayers(activePlayerList, dt);
+
       this.checkRegionDiscoveries(activePlayerList);
 
       // 3. Clues & Timeline Triggers
@@ -403,9 +412,13 @@ export class GameManager {
     }
 
     // World Boundary Hard Clamping
-    const r = CONFIG.PHYSICS.PLAYER_RADIUS;
-    player.x = Math.max(r + 20, Math.min(CONFIG.WORLD.WIDTH - r - 20, player.x));
-    player.y = Math.max(r + 20, Math.min(CONFIG.WORLD.HEIGHT - r - 20, player.y));
+    this.clampPlayerToBounds(player);
+  }
+
+  clampPlayerToBounds(player) {
+    const bounds = CONFIG.PHYSICS.BOUNDS || { MIN_X: 62, MAX_X: 1538, MIN_Y: 62, MAX_Y: 938 };
+    player.x = Math.max(bounds.MIN_X, Math.min(bounds.MAX_X, player.x));
+    player.y = Math.max(bounds.MIN_Y, Math.min(bounds.MAX_Y, player.y));
   }
 
   resolveWallCollisions(player) {
@@ -421,25 +434,27 @@ export class GameManager {
 
       if (distSq < r * r) {
         if (distSq < 0.0001) {
+          // Embedded directly inside wall geometry - eject along shallowest axis with safety padding
           const leftDist = player.x - wall.x;
           const rightDist = (wall.x + wall.width) - player.x;
           const topDist = player.y - wall.y;
           const bottomDist = (wall.y + wall.height) - player.y;
           const minDist = Math.min(leftDist, rightDist, topDist, bottomDist);
 
-          if (minDist === leftDist) { player.x = wall.x - r; player.vx = 0; }
-          else if (minDist === rightDist) { player.x = wall.x + wall.width + r; player.vx = 0; }
-          else if (minDist === topDist) { player.y = wall.y - r; player.vy = 0; }
-          else { player.y = wall.y + wall.height + r; player.vy = 0; }
+          if (minDist === leftDist) { player.x = wall.x - r - 1; player.vx = 0; }
+          else if (minDist === rightDist) { player.x = wall.x + wall.width + r + 1; player.vx = 0; }
+          else if (minDist === topDist) { player.y = wall.y - r - 1; player.vy = 0; }
+          else { player.y = wall.y + wall.height + r + 1; player.vy = 0; }
         } else {
           const dist = Math.sqrt(distSq);
           const nx = deltaX / dist;
           const ny = deltaY / dist;
-          const penetration = r - dist;
+          const penetration = (r - dist) + 0.5;
 
           player.x += nx * penetration;
           player.y += ny * penetration;
 
+          // Only cancel velocity moving INTO the obstacle normal, allowing free sliding along walls & corners
           const velAlongNormal = player.vx * nx + player.vy * ny;
           if (velAlongNormal < 0) {
             player.vx -= velAlongNormal * nx;
@@ -453,28 +468,112 @@ export class GameManager {
   resolvePlayerCollisions(playerList) {
     const r = CONFIG.PHYSICS.PLAYER_RADIUS;
     const minDist = r * 2;
-    const pushFactor = CONFIG.PHYSICS.PLAYER_PUSH_FORCE;
+    const pushFactor = CONFIG.PHYSICS.PLAYER_PUSH_FORCE || 0.35;
+    const maxPushPerTick = CONFIG.PHYSICS.MAX_PUSH_PER_TICK || 6.0;
+
+    const displacements = new Map();
+    for (const p of playerList) {
+      displacements.set(p.id, { dx: 0, dy: 0, count: 0 });
+    }
 
     for (let i = 0; i < playerList.length; i++) {
       for (let j = i + 1; j < playerList.length; j++) {
         const p1 = playerList[i];
         const p2 = playerList[j];
 
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const distSq = dx * dx + dy * dy;
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        let distSq = dx * dx + dy * dy;
 
-        if (distSq < minDist * minDist && distSq > 0.0001) {
+        if (distSq < 0.0001) {
+          dx = (Math.random() - 0.5) || 1;
+          dy = (Math.random() - 0.5) || 1;
+          distSq = dx * dx + dy * dy;
+        }
+
+        if (distSq < minDist * minDist) {
           const dist = Math.sqrt(distSq);
           const overlap = (minDist - dist) * pushFactor * 0.5;
           const nx = dx / dist;
           const ny = dy / dist;
 
-          p1.x -= nx * overlap;
-          p1.y -= ny * overlap;
-          p2.x += nx * overlap;
-          p2.y += ny * overlap;
+          const d1 = displacements.get(p1.id);
+          const d2 = displacements.get(p2.id);
+          if (d1) {
+            d1.dx -= nx * overlap;
+            d1.dy -= ny * overlap;
+            d1.count++;
+          }
+          if (d2) {
+            d2.dx += nx * overlap;
+            d2.dy += ny * overlap;
+            d2.count++;
+          }
         }
+      }
+    }
+
+    // Apply clamped displacement per player
+    for (const player of playerList) {
+      const disp = displacements.get(player.id);
+      if (disp && disp.count > 0) {
+        const totalDist = Math.hypot(disp.dx, disp.dy);
+        if (totalDist > 0.0001) {
+          const clampedDist = Math.min(maxPushPerTick, totalDist);
+          player.x += (disp.dx / totalDist) * clampedDist;
+          player.y += (disp.dy / totalDist) * clampedDist;
+        }
+      }
+    }
+  }
+
+  // Anti-Stuck Safety Net: Detects stationary players attempting to steer for > 3 seconds
+  checkAndResolveStuckPlayers(activePlayerList, dt) {
+    const thresholdSec = CONFIG.PHYSICS.ANTI_STUCK_THRESHOLD_SEC || 3.0;
+    const nudgeDist = CONFIG.PHYSICS.ANTI_STUCK_NUDGE_DIST || 50;
+
+    for (const player of activePlayerList) {
+      const inputX = player.input.x || 0;
+      const inputY = player.input.y || 0;
+      const inputMag = Math.hypot(inputX, inputY);
+
+      if (!player.lastPosCheck) {
+        player.lastPosCheck = { x: player.x, y: player.y };
+        player.stuckDurationSec = 0;
+        continue;
+      }
+
+      const distMoved = Math.hypot(player.x - player.lastPosCheck.x, player.y - player.lastPosCheck.y);
+
+      // If active steering input is held but position moved less than 1.5px
+      if (inputMag > 0.15 && distMoved < 1.5) {
+        player.stuckDurationSec = (player.stuckDurationSec || 0) + dt;
+
+        if (player.stuckDurationSec >= thresholdSec) {
+          console.warn(
+            `[AntiStuck] ⚠️ Player "${player.name}" (${player.id}) stationary at (${Math.round(player.x)}, ${Math.round(player.y)}) for ${player.stuckDurationSec.toFixed(1)}s despite active joystick input (${inputX.toFixed(2)}, ${inputY.toFixed(2)}). Nudging to open ground...`
+          );
+
+          // Compute gentle relocation towards central Plaza (800, 530)
+          const toCenterX = 800 - player.x;
+          const toCenterY = 530 - player.y;
+          const centerDist = Math.hypot(toCenterX, toCenterY) || 1;
+
+          player.x += (toCenterX / centerDist) * nudgeDist;
+          player.y += (toCenterY / centerDist) * nudgeDist;
+          player.vx = (toCenterX / centerDist) * 150;
+          player.vy = (toCenterY / centerDist) * 150;
+
+          // Re-verify clearance
+          this.resolveWallCollisions(player);
+          this.clampPlayerToBounds(player);
+
+          player.stuckDurationSec = 0;
+          player.lastPosCheck = { x: player.x, y: player.y };
+        }
+      } else {
+        player.stuckDurationSec = 0;
+        player.lastPosCheck = { x: player.x, y: player.y };
       }
     }
   }

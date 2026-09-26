@@ -125,7 +125,14 @@ class SimulatedBot {
         this.currentInput.x = 0;
         this.currentInput.y = 0;
       } else {
-        this.targetAngle += (Math.random() - 0.5) * 0.1;
+        // If wandering near outer perimeter, steer back towards central arena
+        if (this.myPos.x < 140 || this.myPos.x > 1460 || this.myPos.y < 140 || this.myPos.y > 860) {
+          const toCenterX = 800 - this.myPos.x;
+          const toCenterY = 530 - this.myPos.y;
+          this.targetAngle = Math.atan2(toCenterY, toCenterX) + (Math.random() - 0.5) * 0.5;
+        } else {
+          this.targetAngle += (Math.random() - 0.5) * 0.1;
+        }
         this.currentInput.x = Math.cos(this.targetAngle) * this.speedFactor;
         this.currentInput.y = Math.sin(this.targetAngle) * this.speedFactor;
       }
