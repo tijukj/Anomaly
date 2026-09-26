@@ -8,56 +8,56 @@ export const ANOMALY_TYPES = [
     name: 'TREASURE RAIN',
     subtitle: 'EXTRA TREASURES BURST ACROSS THE ARENA',
     colorHex: '#00F0FF',
-    durationSec: 20
+    durationSec: CONFIG.ANOMALIES.TREASURE_RAIN_DURATION_SEC || 20
   },
   {
     id: 'SPEED_SURGE',
     name: 'SPEED SURGE',
     subtitle: 'ALL RACERS OVERCLOCKED (1.5X SPEED)',
     colorHex: '#39FF14',
-    durationSec: 18
+    durationSec: CONFIG.ANOMALIES.SPEED_SURGE_DURATION_SEC || 18
   },
   {
     id: 'TELEPORT_STORM',
     name: 'TELEPORT STORM',
     subtitle: 'REALITY GLITCH: ALL RACERS WARPED',
     colorHex: '#FF00FF',
-    durationSec: 15
+    durationSec: CONFIG.ANOMALIES.TELEPORT_STORM_DURATION_SEC || 15
   },
   {
     id: 'FOG',
     name: 'CYBER FOG',
     subtitle: 'ARENA VISIBILITY REDUCED TO RACER RADAR',
     colorHex: '#8888AA',
-    durationSec: 22
+    durationSec: CONFIG.ANOMALIES.CYBER_FOG_DURATION_SEC || 22
   },
   {
     id: 'DOUBLE_POINTS',
     name: 'DOUBLE OVERDRIVE',
     subtitle: 'ALL SCORE REWARDS MULTIPLIED (2X)',
     colorHex: '#FFE600',
-    durationSec: 20
+    durationSec: CONFIG.ANOMALIES.DOUBLE_OVERDRIVE_DURATION_SEC || 20
   },
   {
     id: 'VAULT_ACTIVATION',
     name: 'VAULT ACTIVATION',
     subtitle: 'ALL ANCIENT VAULTS ACCESSIBLE WITHOUT KEYS',
     colorHex: '#FF8800',
-    durationSec: 20
+    durationSec: CONFIG.ANOMALIES.VAULT_ACTIVATION_DURATION_SEC || 20
   },
   {
     id: 'REVERSE_CONTROLS',
     name: 'CONTROL INVERSION',
     subtitle: 'STEERING SENSORS INVERTED (6 SECONDS)',
     colorHex: '#FF0055',
-    durationSec: 6
+    durationSec: CONFIG.ANOMALIES.CONTROL_INVERSION_DURATION_SEC || 6
   },
   {
     id: 'GOLDEN_CROWN',
     name: 'GOLDEN CROWN',
     subtitle: 'HOLD THE CROWN FOR PASSIVE OVERTIME POINTS',
     colorHex: '#FFE600',
-    durationSec: 25
+    durationSec: CONFIG.ANOMALIES.GOLDEN_CROWN_DURATION_SEC || 25
   }
 ];
 

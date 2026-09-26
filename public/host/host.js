@@ -94,6 +94,62 @@ fetch('/api/server-info')
   .catch(err => {
     console.warn('Using default playUrl:', err);
   });
+function drawStarPolygon(gfx, cx, cy, spikes, outerRadius, innerRadius, fillColor, strokeColor, strokeWidth = 2) {
+  let rot = (Math.PI / 2) * 3;
+  let x = cx;
+  let y = cy;
+  const step = Math.PI / spikes;
+
+  if (fillColor !== null && fillColor !== undefined) {
+    gfx.fillStyle(fillColor, 1);
+  }
+  if (strokeColor !== null && strokeColor !== undefined) {
+    gfx.lineStyle(strokeWidth, strokeColor, 1);
+  }
+
+  gfx.beginPath();
+  gfx.moveTo(cx, cy - outerRadius);
+  for (let i = 0; i < spikes; i++) {
+    x = cx + Math.cos(rot) * outerRadius;
+    y = cy + Math.sin(rot) * outerRadius;
+    gfx.lineTo(x, y);
+    rot += step;
+
+    x = cx + Math.cos(rot) * innerRadius;
+    y = cy + Math.sin(rot) * innerRadius;
+    gfx.lineTo(x, y);
+    rot += step;
+  }
+  gfx.lineTo(cx, cy - outerRadius);
+  gfx.closePath();
+  if (fillColor !== null && fillColor !== undefined) gfx.fillPath();
+  if (strokeColor !== null && strokeColor !== undefined) gfx.strokePath();
+}
+
+function drawPolygon(gfx, cx, cy, sides, radius, fillColor, strokeColor, strokeWidth = 2, rotation = 0) {
+  if (fillColor !== null && fillColor !== undefined) {
+    gfx.fillStyle(fillColor, 1);
+  }
+  if (strokeColor !== null && strokeColor !== undefined) {
+    gfx.lineStyle(strokeWidth, strokeColor, 1);
+  }
+
+  const angleStep = (Math.PI * 2) / sides;
+  gfx.beginPath();
+  for (let i = 0; i < sides; i++) {
+    const angle = i * angleStep + rotation;
+    const px = cx + Math.cos(angle) * radius;
+    const py = cy + Math.sin(angle) * radius;
+    if (i === 0) {
+      gfx.moveTo(px, py);
+    } else {
+      gfx.lineTo(px, py);
+    }
+  }
+  gfx.closePath();
+  if (fillColor !== null && fillColor !== undefined) gfx.fillPath();
+  if (strokeColor !== null && strokeColor !== undefined) gfx.strokePath();
+}
 
 function formatTime(totalSeconds) {
   const mins = Math.floor(totalSeconds / 60);
@@ -763,10 +819,13 @@ class HostScene extends Phaser.Scene {
     this.borderFlashGraphics = null;
     this.sentinelsGraphics = null;
     this.hudContainer = null;
+    this.effectsTrayContainer = null;
     this.countdownContainer = null;
     this.endedContainer = null;
     this.leaderboardContainer = null;
+    this.whoToBeatContainer = null;
     this.cluesPanelContainer = null;
+    this.huntChecklistContainer = null;
     this.eventFeedContainer = null;
     this.joinRequestContainer = null;
     this.celebrationContainer = null;
@@ -777,6 +836,7 @@ class HostScene extends Phaser.Scene {
     this.pendingRequests = [];
     this.lastRenderedState = '';
     this.lastCluesCount = 0;
+    this.focusedPlayerId = null;
   }
 
   preload() {
@@ -802,20 +862,23 @@ class HostScene extends Phaser.Scene {
     this.labelsContainer = this.add.container(0, 0);
     this.fxContainer = this.add.container(0, 0);
 
-    // Left Column: Live Commentary Feed & Match Badges
-    this.eventFeedContainer = this.add.container(25, 30);
+    // Left Column: Top Checklist (0-220) & Live Commentary Feed (245-980)
+    this.huntChecklistContainer = this.add.container(25, 25);
+    this.eventFeedContainer = this.add.container(25, 245);
 
-    // Center Top: Digital Clock & Anomaly Banner
-    this.hudContainer = this.add.container(1100, 24);
-    this.anomalyContainer = this.add.container(1100, 85);
-    this.joinRequestContainer = this.add.container(1100, 140);
+    // Center Top: Digital Clock, Active Effects Tray & Anomaly Banner
+    this.hudContainer = this.add.container(1100, 20);
+    this.effectsTrayContainer = this.add.container(1100, 78);
+    this.anomalyContainer = this.add.container(1100, 135);
+    this.joinRequestContainer = this.add.container(1100, 185);
     this.countdownContainer = this.add.container(0, 0);
     this.endedContainer = this.add.container(0, 0);
 
-    // Right Column: Leaderboard, Known Clues & Controls
-    this.leaderboardContainer = this.add.container(1930, 30);
-    this.cluesPanelContainer = this.add.container(1930, 320);
-    this.controlsContainer = this.add.container(1930, 830);
+    // Right Column: Leaderboard (25-255), Who to Beat (275-435), Known Clues (450-625) & Controls (640-800)
+    this.leaderboardContainer = this.add.container(1930, 25);
+    this.whoToBeatContainer = this.add.container(1930, 275);
+    this.cluesPanelContainer = this.add.container(1930, 445);
+    this.controlsContainer = this.add.container(1930, 640);
 
     this.crownContainer = this.add.container(0, 0);
     this.fogGraphics = this.add.graphics();
@@ -829,11 +892,14 @@ class HostScene extends Phaser.Scene {
     this.sentinelsGraphics.setDepth(25);
     this.fogGraphics.setDepth(48);
     this.crownContainer.setDepth(52);
-    this.cluesPanelContainer.setDepth(55);
+    this.huntChecklistContainer.setDepth(60);
     this.eventFeedContainer.setDepth(60);
     this.leaderboardContainer.setDepth(60);
+    this.whoToBeatContainer.setDepth(60);
+    this.cluesPanelContainer.setDepth(60);
     this.controlsContainer.setDepth(60);
     this.hudContainer.setDepth(110);
+    this.effectsTrayContainer.setDepth(115);
     this.anomalyContainer.setDepth(120);
     this.joinRequestContainer.setDepth(140);
     this.celebrationContainer.setDepth(300);
@@ -883,6 +949,11 @@ class HostScene extends Phaser.Scene {
       sounds.init();
       const isMuted = sounds.toggleMute();
       this.updateSoundStatusBadge(isMuted);
+    });
+
+    this.pKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
+    this.pKey.on('down', () => {
+      this.cycleFocusedPlayer();
     });
 
     this.dKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
@@ -1175,34 +1246,47 @@ class HostScene extends Phaser.Scene {
   }
 
   addHostEvent(event) {
-    // Determine icon
-    let icon = event.icon;
-    if (!icon) {
-      const type = (event.type || '').toLowerCase();
-      const text = (event.text || '').toLowerCase();
-      if (type.includes('treasure') || text.includes('treasure')) icon = '💎';
-      else if (type.includes('vault') || text.includes('vault')) icon = '🗝️';
-      else if (type.includes('chest') || text.includes('chest')) icon = '📦';
-      else if (type.includes('anomaly') || text.includes('anomaly')) icon = '🌀';
-      else if (type.includes('clue') || text.includes('clue')) icon = '📜';
-      else if (type.includes('mission') || text.includes('mission')) icon = '🎯';
-      else if (type.includes('hazard') || text.includes('hazard')) icon = '💥';
-      else if (type.includes('crown') || text.includes('crown')) icon = '👑';
-      else if (type.includes('lead') || text.includes('rank') || text.includes('podium') || text.includes('winner')) icon = '🏆';
-      else if (type.includes('portal') || text.includes('portal')) icon = '🌀';
-      else if (type.includes('merchant') || text.includes('merchant')) icon = '💰';
-      else icon = '⚡';
+    // Determine geometric glyph badge
+    let glyph = '[⚡ RACE]';
+    let glyphColor = '#FFFFFF';
+    const type = (event.type || '').toLowerCase();
+    const text = (event.text || '').toLowerCase();
+
+    if (type.includes('clue') || text.includes('clue')) {
+      glyph = '[📜 CLUE]';
+      glyphColor = '#00F0FF';
+    } else if (type.includes('vault') || type.includes('key') || text.includes('vault') || text.includes('key')) {
+      glyph = '[🗝️ VAULT]';
+      glyphColor = '#FF8800';
+    } else if (type.includes('glitch') || text.includes('glitch') || type.includes('anomaly') || text.includes('anomaly')) {
+      glyph = '[⚡ ANOMALY]';
+      glyphColor = '#FFE600';
+    } else if (type.includes('crown') || text.includes('crown')) {
+      glyph = '[👑 CROWN]';
+      glyphColor = '#FFE600';
+    } else if (type.includes('mission') || text.includes('mission')) {
+      glyph = '[🎯 MISSION]';
+      glyphColor = '#39FF14';
+    } else if (type.includes('hazard') || text.includes('hazard') || text.includes('sentinel')) {
+      glyph = '[💥 HAZARD]';
+      glyphColor = '#FF0055';
+    } else if (type.includes('contested') || type.includes('rivalry') || text.includes('contested') || text.includes('rivalry') || text.includes('so close')) {
+      glyph = '[⚔️ BATTLE]';
+      glyphColor = '#FF0055';
+    } else if (type.includes('discover') || text.includes('explored') || text.includes('discovery')) {
+      glyph = '[🧭 EXPLORE]';
+      glyphColor = '#00B4D8';
     }
 
-    let displayText = event.text || '';
-    if (!displayText.startsWith(icon)) {
-      displayText = `${icon} ${displayText}`;
-    }
+    let cleanText = (event.text || '').trim();
+    // Strip leading raw emoji if text already has one
+    cleanText = cleanText.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+\s*/u, '');
 
     const enrichedEvent = {
       ...event,
-      icon,
-      text: displayText,
+      glyph,
+      glyphColor,
+      text: cleanText,
       createdAt: Date.now()
     };
 
@@ -1214,10 +1298,131 @@ class HostScene extends Phaser.Scene {
     this.renderEventFeed();
   }
 
-  // Left Column: Live Commentary Feed (Completely outside map)
+  // Left Column: 4-Step Legendary Hunt Checklist (Top-Left 25, 25)
+  drawHuntChecklist(clueState) {
+    this.huntChecklistContainer.removeAll(true);
+    if (currentGameState.state !== 'RUNNING') return;
+
+    const width = 250;
+    const boxH = 205;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0a0a1e, 0.94);
+    bg.fillRoundedRect(0, 0, width, boxH, 10);
+    bg.lineStyle(1.5, 0x00F0FF, 0.75);
+    bg.strokeRoundedRect(0, 0, width, boxH, 10);
+    this.huntChecklistContainer.add(bg);
+
+    const title = this.add.text(12, 14, '👑 LEGENDARY HUNT', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '14px',
+      color: '#FFE600',
+      letterSpacing: 2
+    });
+
+    const sub = this.add.text(12, 32, '4-STEP RACE TO CITADEL VAULT', {
+      fontFamily: 'sans-serif',
+      fontSize: '9px',
+      fontStyle: 'bold',
+      color: '#8888AA',
+      letterSpacing: 1
+    });
+    this.huntChecklistContainer.add([title, sub]);
+
+    const activeStep = (clueState && clueState.activeStep) || 0;
+    const knownClues = (clueState && clueState.knownClues) || [];
+    const isVaultClaimed = clueState && (clueState.vaultState === 'claimed' || activeStep >= 5);
+
+    const steps = [
+      {
+        num: 1,
+        title: 'Clue #1 Discovered',
+        isDone: knownClues.length >= 1,
+        isActive: activeStep === 1 && knownClues.length === 0,
+        finder: knownClues[0] ? knownClues[0].discoverer : ''
+      },
+      {
+        num: 2,
+        title: 'Clue #2 Discovered',
+        isDone: knownClues.length >= 2,
+        isActive: activeStep === 2 && knownClues.length === 1,
+        finder: knownClues[1] ? knownClues[1].discoverer : ''
+      },
+      {
+        num: 3,
+        title: 'Clue #3 Discovered',
+        isDone: knownClues.length >= 3,
+        isActive: activeStep === 3 && knownClues.length === 2,
+        finder: knownClues[2] ? knownClues[2].discoverer : ''
+      },
+      {
+        num: 4,
+        title: 'Legendary Claimed (+150)',
+        isDone: isVaultClaimed,
+        isActive: activeStep === 4 && !isVaultClaimed,
+        finder: isVaultClaimed ? (clueState.claimedBy || 'CLAIMED') : ''
+      }
+    ];
+
+    steps.forEach((step, idx) => {
+      const stepY = 52 + idx * 36;
+      const stepBox = this.add.graphics();
+
+      let boxColor = 0x141430;
+      let borderColor = 0x333355;
+      let checkChar = '○';
+      let checkColor = '#666688';
+      let textColor = '#8888AA';
+
+      if (step.isDone) {
+        boxColor = 0x052518;
+        borderColor = 0x39FF14;
+        checkChar = '✓';
+        checkColor = '#39FF14';
+        textColor = '#FFFFFF';
+      } else if (step.isActive) {
+        boxColor = 0x181840;
+        borderColor = 0x00F0FF;
+        checkChar = '◆';
+        checkColor = '#00F0FF';
+        textColor = '#00F0FF';
+      }
+
+      stepBox.fillStyle(boxColor, 0.9);
+      stepBox.fillRoundedRect(8, stepY, width - 16, 30, 6);
+      stepBox.lineStyle(1.2, borderColor, 0.85);
+      stepBox.strokeRoundedRect(8, stepY, width - 16, 30, 6);
+      this.huntChecklistContainer.add(stepBox);
+
+      const checkText = this.add.text(16, stepY + 15, `[ ${checkChar} ]`, {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        fontStyle: 'bold',
+        color: checkColor
+      }).setOrigin(0, 0.5);
+
+      let labelStr = step.title;
+      if (step.isDone && step.finder) {
+        labelStr = `${step.title.slice(0, 12)} (${step.finder})`;
+      } else if (step.isActive) {
+        labelStr = `${step.title} [ACTIVE]`;
+      }
+
+      const text = this.add.text(56, stepY + 15, labelStr, {
+        fontFamily: 'sans-serif',
+        fontSize: '10px',
+        fontStyle: 'bold',
+        color: textColor
+      }).setOrigin(0, 0.5);
+
+      this.huntChecklistContainer.add([checkText, text]);
+    });
+  }
+
+  // Left Column: Live Commentary Feed (Positioned at 25, 245)
   renderEventFeed() {
     this.eventFeedContainer.removeAll(true);
-    if (this.hostEvents.length === 0) return;
+    if (this.hostEvents.length === 0 || currentGameState.state !== 'RUNNING') return;
 
     const width = 250;
     const count = this.hostEvents.length;
@@ -1257,16 +1462,226 @@ class HostScene extends Phaser.Scene {
         });
       }
 
-      const text = this.add.text(12, lineY, ev.text || '', {
+      // Glyph Chip
+      const glyphText = this.add.text(12, lineY, ev.glyph || '[⚡]', {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
+        fontSize: '10px',
+        color: ev.glyphColor || '#00F0FF',
+        letterSpacing: 0.5
+      });
+
+      // Event Details Line
+      const text = this.add.text(12, lineY + 14, ev.text || '', {
         fontFamily: 'sans-serif',
         fontSize: '11px',
         fontStyle: 'bold',
         color: ev.colorHex || '#FFFFFF',
         wordWrap: { width: width - 24 },
-        lineSpacing: 2
+        lineSpacing: 1
       });
-      this.eventFeedContainer.add(text);
+      this.eventFeedContainer.add([glyphText, text]);
     });
+  }
+
+  // Right Column: Who To Beat / Closest Rival Gap Panel (1930, 275)
+  drawWhoToBeatPanel(leaderboard = []) {
+    this.whoToBeatContainer.removeAll(true);
+    if (currentGameState.state !== 'RUNNING' || !leaderboard || leaderboard.length === 0) return;
+
+    const width = 240;
+    const boxH = 155;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0a0a1e, 0.92);
+    bg.fillRoundedRect(0, 0, width, boxH, 10);
+    bg.lineStyle(1.5, 0x9D00FF, 0.8);
+    bg.strokeRoundedRect(0, 0, width, boxH, 10);
+    this.whoToBeatContainer.add(bg);
+
+    // If host has pinned a player with 'P' key
+    if (this.focusedPlayerId) {
+      const allPlayers = currentGameState.players || leaderboard;
+      const focusedIndex = leaderboard.findIndex(p => p.id === this.focusedPlayerId);
+      const player = leaderboard[focusedIndex] || allPlayers.find(p => p.id === this.focusedPlayerId);
+
+      if (player) {
+        const title = this.add.text(12, 14, '⚡ TARGET TRACKER [P]', {
+          fontFamily: '"Impact", "Arial Black", sans-serif',
+          fontSize: '13px',
+          color: '#00F0FF',
+          letterSpacing: 1.5
+        });
+        this.whoToBeatContainer.add(title);
+
+        const currentRank = focusedIndex >= 0 ? focusedIndex + 1 : '—';
+        const pInfo = this.add.text(12, 38, `FOCUS: ${player.name} (#${currentRank})`, {
+          fontFamily: 'sans-serif',
+          fontSize: '12px',
+          fontStyle: 'bold',
+          color: '#FFFFFF'
+        });
+        const pScore = this.add.text(width - 12, 38, `${player.score || 0} pts`, {
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          fontStyle: 'bold',
+          color: '#39FF14'
+        }).setOrigin(1, 0);
+
+        this.whoToBeatContainer.add([pInfo, pScore]);
+
+        if (focusedIndex === 0) {
+          // Rank 1 Leader
+          const leadBadge = this.add.text(width / 2, 85, '👑 CURRENT MATCH LEADER!', {
+            fontFamily: '"Impact", "Arial Black", sans-serif',
+            fontSize: '14px',
+            color: '#FFE600',
+            letterSpacing: 1
+          }).setOrigin(0.5);
+
+          const leadSub = this.add.text(width / 2, 112, `Lead: +${leaderboard.length > 1 ? player.score - leaderboard[1].score : 0} pts over #2`, {
+            fontFamily: 'sans-serif',
+            fontSize: '11px',
+            color: '#8888AA'
+          }).setOrigin(0.5);
+          this.whoToBeatContainer.add([leadBadge, leadSub]);
+        } else if (focusedIndex > 0) {
+          // Has someone to beat directly above
+          const rival = leaderboard[focusedIndex - 1];
+          const gap = rival.score - player.score;
+
+          const toBeatCard = this.add.graphics();
+          toBeatCard.fillStyle(0x181030, 0.9);
+          toBeatCard.fillRoundedRect(8, 62, width - 16, 60, 6);
+          toBeatCard.lineStyle(1, 0xFF0055, 0.6);
+          toBeatCard.strokeRoundedRect(8, 62, width - 16, 60, 6);
+          this.whoToBeatContainer.add(toBeatCard);
+
+          const targetLabel = this.add.text(14, 70, `TARGET: #${focusedIndex} ${rival.name}`, {
+            fontFamily: 'sans-serif',
+            fontSize: '11px',
+            fontStyle: 'bold',
+            color: '#FFE600'
+          });
+          const targetScore = this.add.text(width - 14, 70, `${rival.score} pts`, {
+            fontFamily: 'monospace',
+            fontSize: '11px',
+            color: '#FFFFFF'
+          }).setOrigin(1, 0);
+
+          const gapText = this.add.text(width / 2, 100, `🔥 NEED +${gap + 1} PTS TO PASS`, {
+            fontFamily: '"Impact", "Arial Black", sans-serif',
+            fontSize: '13px',
+            color: '#FF0055',
+            letterSpacing: 1
+          }).setOrigin(0.5);
+          this.whoToBeatContainer.add([targetLabel, targetScore, gapText]);
+        }
+
+        const footer = this.add.text(width / 2, 138, '[ Press P to Cycle Target ]', {
+          fontFamily: 'monospace',
+          fontSize: '10px',
+          color: '#666688'
+        }).setOrigin(0.5);
+        this.whoToBeatContainer.add(footer);
+        return;
+      }
+    }
+
+    // Default Spectator Mode: Closest Podium Battles
+    const title = this.add.text(12, 14, '⚡ WHO TO BEAT (CHASE)', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: '13px',
+      color: '#00F0FF',
+      letterSpacing: 1.5
+    });
+    this.whoToBeatContainer.add(title);
+
+    if (leaderboard.length >= 2) {
+      const p1 = leaderboard[0];
+      const p2 = leaderboard[1];
+      const gap1 = p1.score - p2.score;
+
+      const card1 = this.add.graphics();
+      card1.fillStyle(0x141432, 0.85);
+      card1.fillRoundedRect(8, 36, width - 16, 44, 6);
+      card1.lineStyle(1, 0xFFE600, 0.5);
+      card1.strokeRoundedRect(8, 36, width - 16, 44, 6);
+      this.whoToBeatContainer.add(card1);
+
+      const b1Title = this.add.text(14, 42, `👑 #1 RACE: ${p2.name} ➔ ${p1.name}`, {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        fontStyle: 'bold',
+        color: '#FFE600'
+      });
+      const b1Gap = this.add.text(14, 60, `GAP: ${gap1 === 0 ? 'TIED FOR 1ST!' : `Need +${gap1 + 1} pts to lead`}`, {
+        fontFamily: 'monospace',
+        fontSize: '10px',
+        color: '#39FF14'
+      });
+      this.whoToBeatContainer.add([b1Title, b1Gap]);
+    }
+
+    if (leaderboard.length >= 4) {
+      const p3 = leaderboard[2];
+      const p4 = leaderboard[3];
+      const gap2 = p3.score - p4.score;
+
+      const card2 = this.add.graphics();
+      card2.fillStyle(0x141432, 0.85);
+      card2.fillRoundedRect(8, 86, width - 16, 44, 6);
+      card2.lineStyle(1, 0xCD7F32, 0.5);
+      card2.strokeRoundedRect(8, 86, width - 16, 44, 6);
+      this.whoToBeatContainer.add(card2);
+
+      const b2Title = this.add.text(14, 92, `🥉 PODIUM: ${p4.name} ➔ ${p3.name}`, {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        fontStyle: 'bold',
+        color: '#CD7F32'
+      });
+      const b2Gap = this.add.text(14, 110, `GAP: ${gap2 === 0 ? 'TIED FOR 3RD!' : `Need +${gap2 + 1} pts for podium`}`, {
+        fontFamily: 'monospace',
+        fontSize: '10px',
+        color: '#00F0FF'
+      });
+      this.whoToBeatContainer.add([b2Title, b2Gap]);
+    } else if (leaderboard.length === 1) {
+      const loneText = this.add.text(width / 2, 85, 'Waiting for more racers...', {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        color: '#666688'
+      }).setOrigin(0.5);
+      this.whoToBeatContainer.add(loneText);
+    }
+
+    const tip = this.add.text(width / 2, 140, '[ Press P to Focus Racer ]', {
+      fontFamily: 'monospace',
+      fontSize: '10px',
+      color: '#555577'
+    }).setOrigin(0.5);
+    this.whoToBeatContainer.add(tip);
+  }
+
+  cycleFocusedPlayer() {
+    const players = Array.from(this.playerMap.keys());
+    if (players.length === 0) {
+      this.focusedPlayerId = null;
+      return;
+    }
+    if (!this.focusedPlayerId) {
+      this.focusedPlayerId = players[0];
+    } else {
+      const idx = players.indexOf(this.focusedPlayerId);
+      if (idx === -1 || idx === players.length - 1) {
+        this.focusedPlayerId = null; // Return to general mode
+      } else {
+        this.focusedPlayerId = players[idx + 1];
+      }
+    }
+    if (latestSnapshot && latestSnapshot.lb) {
+      this.drawWhoToBeatPanel(latestSnapshot.lb);
+    }
   }
 
   // Right Column: Public "Known Clues" Panel (3 Fixed Slots)
@@ -1365,7 +1780,7 @@ class HostScene extends Phaser.Scene {
     if (currentGameState.state !== 'RUNNING') return;
 
     const width = 240;
-    const boxH = 135;
+    const boxH = 150;
 
     const bg = this.add.graphics();
     bg.fillStyle(0x0a0a1e, 0.92);
@@ -1383,13 +1798,14 @@ class HostScene extends Phaser.Scene {
 
     const shortcuts = [
       '[ A ] Approve Racers',
-      '[ S ] Toggle Sound',
-      '[ R ] Reset Match',
+      '[ P ] Target Racer Focus',
+      '[ S ] Toggle Sound FX',
+      '[ R ] Reset Match to Lobby',
       '[ ESC ] Return to Lobby'
     ];
 
     shortcuts.forEach((sc, idx) => {
-      const text = this.add.text(12, 34 + idx * 22, sc, {
+      const text = this.add.text(12, 32 + idx * 22, sc, {
         fontFamily: 'monospace',
         fontSize: '11px',
         color: '#FFFFFF'
@@ -1656,6 +2072,9 @@ class HostScene extends Phaser.Scene {
       this.countdownContainer.setVisible(false);
       this.endedContainer.setVisible(false);
       this.hudContainer.removeAll(true);
+      this.effectsTrayContainer.removeAll(true);
+      this.huntChecklistContainer.removeAll(true);
+      this.whoToBeatContainer.removeAll(true);
       this.eventFeedContainer.removeAll(true);
       this.cluesPanelContainer.removeAll(true);
       this.controlsContainer.removeAll(true);
@@ -2048,23 +2467,27 @@ class HostScene extends Phaser.Scene {
 
       if (ent.type === 'treasure') {
         const tier = ent.tier || 'common';
-        const texKey = `treasure_${tier}`;
-
-        // Soft tier-colored aura
-        const glowColor = ent.colorNum || (tier === 'epic' ? 0xff0055 : (tier === 'rare' ? 0xffe600 : 0x00f0ff));
-        this.interactablesGraphics.fillStyle(glowColor, 0.35);
-        this.interactablesGraphics.fillCircle(ex, ey, 14);
-
-        let sprite = this.interactableSpriteMap.get(ent.id);
-        if (!sprite) {
-          sprite = this.add.image(ex, ey, texKey).setDisplaySize(24, 24).setDepth(20);
-          this.interactableSpriteMap.set(ent.id, sprite);
+        if (tier === 'epic') {
+          // Epic: Star ★ with magenta glow
+          this.interactablesGraphics.fillStyle(0xFF0055, 0.3);
+          this.interactablesGraphics.fillCircle(ex, ey, 20);
+          drawStarPolygon(this.interactablesGraphics, ex, ey, 5, 15, 7, 0xFF0055, 0xFFFFFF, 2);
+        } else if (tier === 'rare') {
+          // Rare: Diamond ◆ with gold glow
+          this.interactablesGraphics.fillStyle(0xFFE600, 0.3);
+          this.interactablesGraphics.fillCircle(ex, ey, 16);
+          drawPolygon(this.interactablesGraphics, ex, ey, 4, 13, 0xFFE600, 0xFFFFFF, 2, 0);
         } else {
-          sprite.setPosition(ex, ey);
-          sprite.setTexture(texKey);
-          sprite.setVisible(true);
+          // Common: Circle ● with cyan glow
+          this.interactablesGraphics.fillStyle(0x00F0FF, 0.3);
+          this.interactablesGraphics.fillCircle(ex, ey, 14);
+          this.interactablesGraphics.fillStyle(0x00F0FF, 0.95);
+          this.interactablesGraphics.fillCircle(ex, ey, 9);
+          this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
+          this.interactablesGraphics.strokeCircle(ex, ey, 9);
         }
       } else if (ent.type === 'glitch') {
+        // Glitch: Octagon ✦ with countdown arc & magenta glow
         const now = Date.now();
         const remFraction = ent.expiresAt ? Math.max(0, (ent.expiresAt - now) / ((ent.durationSec || 10) * 1000)) : 1.0;
         
@@ -2075,31 +2498,13 @@ class HostScene extends Phaser.Scene {
 
         this.interactablesGraphics.fillStyle(0xFF00FF, 0.35);
         this.interactablesGraphics.fillCircle(ex, ey, 16);
-
-        let sprite = this.interactableSpriteMap.get(ent.id);
-        if (!sprite) {
-          sprite = this.add.image(ex, ey, 'treasure_glitch').setDisplaySize(28, 28).setDepth(21);
-          this.interactableSpriteMap.set(ent.id, sprite);
-        } else {
-          sprite.setPosition(ex, ey);
-          sprite.setTexture('treasure_glitch');
-          sprite.setVisible(true);
-        }
+        drawPolygon(this.interactablesGraphics, ex, ey, 8, 13, 0xFF00FF, 0xFFFFFF, 2, Math.PI / 8);
       } else if (ent.type === 'legendary_vault') {
-        this.interactablesGraphics.fillStyle(0x050518, 0.95);
-        this.interactablesGraphics.fillRoundedRect(ex - 24, ey - 24, 48, 48, 10);
-        this.interactablesGraphics.lineStyle(3, 0xFFE600, 1);
-        this.interactablesGraphics.strokeRoundedRect(ex - 24, ey - 24, 48, 48, 10);
-
-        let sprite = this.interactableSpriteMap.get(ent.id);
-        if (!sprite) {
-          sprite = this.add.image(ex, ey, 'treasure_legendary').setDisplaySize(32, 32).setDepth(22);
-          this.interactableSpriteMap.set(ent.id, sprite);
-        } else {
-          sprite.setPosition(ex, ey);
-          sprite.setTexture('treasure_legendary');
-          sprite.setVisible(true);
-        }
+        // Legendary Vault: Hexagon ⬡ in gold aura
+        this.interactablesGraphics.fillStyle(0xFFE600, 0.25);
+        this.interactablesGraphics.fillCircle(ex, ey, 28);
+        drawPolygon(this.interactablesGraphics, ex, ey, 6, 22, 0x141438, 0xFFE600, 3.5, Math.PI / 6);
+        drawStarPolygon(this.interactablesGraphics, ex, ey, 5, 11, 5, 0xFFE600, 0xFFFFFF, 1.5);
       } else if (ent.type === 'clue') {
         this.interactablesGraphics.fillStyle(0x00F0FF, 0.95);
         this.interactablesGraphics.fillCircle(ex, ey, 14);
@@ -2113,10 +2518,13 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
         this.interactablesGraphics.strokeCircle(ex, ey, 11);
       } else if (ent.type === 'chest') {
+        // Chamfered box ■
         this.interactablesGraphics.fillStyle(0xFFAA00, 0.95);
         this.interactablesGraphics.fillRoundedRect(ex - 14, ey - 12, 28, 24, 4);
         this.interactablesGraphics.lineStyle(2, 0xFFFFFF, 0.9);
         this.interactablesGraphics.strokeRoundedRect(ex - 14, ey - 12, 28, 24, 4);
+        this.interactablesGraphics.fillStyle(0x050518, 1);
+        this.interactablesGraphics.fillRect(ex - 3, ey - 2, 6, 6);
       } else if (ent.type === 'vault') {
         this.interactablesGraphics.fillStyle(0xFF8800, 0.9);
         this.interactablesGraphics.fillRoundedRect(ex - 18, ey - 18, 36, 36, 6);
@@ -2126,13 +2534,16 @@ class HostScene extends Phaser.Scene {
         this.interactablesGraphics.fillCircle(ex, ey, 6);
       } else if (ent.type === 'key') {
         this.interactablesGraphics.fillStyle(0xFFDD00, 1);
-        this.interactablesGraphics.fillCircle(ex, ey, 7);
-        this.interactablesGraphics.fillRect(ex, ey - 2, 10, 4);
+        this.interactablesGraphics.fillCircle(ex - 4, ey, 7);
+        this.interactablesGraphics.fillRect(ex - 4, ey - 2, 14, 4);
+        this.interactablesGraphics.fillRect(ex + 6, ey + 2, 4, 5);
         this.interactablesGraphics.lineStyle(1.5, 0xFFFFFF, 1);
-        this.interactablesGraphics.strokeCircle(ex, ey, 7);
+        this.interactablesGraphics.strokeCircle(ex - 4, ey, 7);
       } else if (ent.type === 'portal') {
         this.interactablesGraphics.lineStyle(3, 0x00F0FF, 0.85);
         this.interactablesGraphics.strokeCircle(ex, ey, 16);
+        this.interactablesGraphics.lineStyle(1.5, 0xFFFFFF, 0.7);
+        this.interactablesGraphics.strokeCircle(ex, ey, 10);
         this.interactablesGraphics.fillStyle(0x00F0FF, 0.25);
         this.interactablesGraphics.fillCircle(ex, ey, 16);
       } else if (ent.type === 'merchant') {
@@ -2192,7 +2603,7 @@ class HostScene extends Phaser.Scene {
     }
   }
 
-  // Right Column: Top 5 Leaderboard with Smooth 300ms Sliding & Flash
+  // Right Column: Top 5 Leaderboard with Smooth 300ms Sliding & Flash & Delta Arrows
   drawHostLeaderboard(leaderboard = []) {
     if (currentGameState.state !== 'RUNNING') {
       this.leaderboardContainer.removeAll(true);
@@ -2239,7 +2650,7 @@ class HostScene extends Phaser.Scene {
       }
     }
 
-    // Update or add rows with sliding tween
+    // Update or add rows with sliding tween & delta arrows
     leaderboard.forEach((player, idx) => {
       const targetY = 44 + idx * 38;
       const rankColor = rankColors[idx] || '#FFFFFF';
@@ -2267,6 +2678,13 @@ class HostScene extends Phaser.Scene {
         }).setOrigin(0, 0.5);
         rowContainer.add(nameText);
 
+        const deltaText = this.add.text(width - 55, 8, '', {
+          fontFamily: 'sans-serif',
+          fontSize: '10px',
+          fontStyle: 'bold'
+        }).setOrigin(1, 0.5);
+        rowContainer.add(deltaText);
+
         const scoreText = this.add.text(width - 10, 8, `${player.score}`, {
           fontFamily: 'monospace',
           fontSize: '13px',
@@ -2286,6 +2704,8 @@ class HostScene extends Phaser.Scene {
           container: rowContainer,
           pip,
           nameText,
+          deltaText,
+          deltaTween: null,
           scoreText,
           flashGfx,
           rankIndex: idx
@@ -2294,6 +2714,7 @@ class HostScene extends Phaser.Scene {
       } else {
         // Row exists: check if rank changed
         if (row.rankIndex !== idx) {
+          const rankDiff = row.rankIndex - idx; // Positive = gained positions (e.g. 2 -> 0 is +2)
           row.rankIndex = idx;
           this.tweens.add({
             targets: row.container,
@@ -2315,6 +2736,23 @@ class HostScene extends Phaser.Scene {
               row.flashGfx.setAlpha(1);
             }
           });
+
+          // Delta Arrow (▲+N or ▼-N) fading after 3 seconds
+          if (rankDiff !== 0 && row.deltaText) {
+            const isUp = rankDiff > 0;
+            row.deltaText.setText(isUp ? `▲+${rankDiff}` : `▼${rankDiff}`);
+            row.deltaText.setColor(isUp ? '#39FF14' : '#FF0055');
+            row.deltaText.setAlpha(1);
+            if (row.deltaTween) {
+              row.deltaTween.stop();
+            }
+            row.deltaTween = this.tweens.add({
+              targets: row.deltaText,
+              alpha: 0,
+              duration: 3000,
+              ease: 'Power1'
+            });
+          }
         }
 
         const rivalSuffix = player.isRival ? ' ⚔️' : '';
@@ -2339,6 +2777,63 @@ class HostScene extends Phaser.Scene {
           entity.topCrown.setVisible(idx === 0);
         }
       }
+    });
+  }
+
+  // Active Effects Tray under running HUD timer
+  renderActiveEffectsTray(anomaliesState) {
+    this.effectsTrayContainer.removeAll(true);
+    if (!anomaliesState || currentGameState.state !== 'RUNNING') return;
+
+    const activeList = [];
+    if (anomaliesState.activeAnomalies && anomaliesState.activeAnomalies.length > 0) {
+      anomaliesState.activeAnomalies.forEach(a => {
+        const dur = a.remainingDurationSec || a.durationSec || 0;
+        activeList.push({
+          icon: a.id === 'SPEED_SURGE' ? '⚡' : (a.id === 'DOUBLE_OVERDRIVE' ? '💎' : (a.id === 'FOG_OF_WAR' ? '🌫️' : '🌀')),
+          label: a.name || a.id,
+          timeText: dur > 0 ? `${Math.ceil(dur)}s` : '',
+          colorHex: a.colorHex || '#00F0FF'
+        });
+      });
+    }
+
+    if (anomaliesState.crown && anomaliesState.crown.active) {
+      activeList.push({
+        icon: '👑',
+        label: 'CROWN ACTIVE',
+        timeText: '+2/s',
+        colorHex: '#FFE600'
+      });
+    }
+
+    if (activeList.length === 0) return;
+
+    const pillW = 160;
+    const pillH = 26;
+    const spacing = 10;
+    const totalW = activeList.length * pillW + (activeList.length - 1) * spacing;
+    const startX = -totalW / 2;
+
+    activeList.forEach((effect, idx) => {
+      const px = startX + idx * (pillW + spacing) + pillW / 2;
+      const colorNum = Phaser.Display.Color.HexStringToColor(effect.colorHex).color;
+
+      const pillBg = this.add.graphics();
+      pillBg.fillStyle(0x0a0a24, 0.94);
+      pillBg.fillRoundedRect(px - pillW / 2, 0, pillW, pillH, 13);
+      pillBg.lineStyle(1.5, colorNum, 0.9);
+      pillBg.strokeRoundedRect(px - pillW / 2, 0, pillW, pillH, 13);
+      this.effectsTrayContainer.add(pillBg);
+
+      const label = `${effect.icon} ${effect.label} ${effect.timeText ? `[${effect.timeText}]` : ''}`.trim();
+      const txt = this.add.text(px, pillH / 2, label, {
+        fontFamily: 'sans-serif',
+        fontSize: '10px',
+        fontStyle: 'bold',
+        color: effect.colorHex
+      }).setOrigin(0.5);
+      this.effectsTrayContainer.add(txt);
     });
   }
 
@@ -3325,19 +3820,23 @@ class HostScene extends Phaser.Scene {
 
     if (snapshot.lb) {
       this.drawHostLeaderboard(snapshot.lb);
+      this.drawWhoToBeatPanel(snapshot.lb);
     }
 
     if (snapshot.clues) {
       this.drawKnownCluesPanel(snapshot.clues.knownClues, snapshot.clues.chainTitle, snapshot.clues);
+      this.drawHuntChecklist(snapshot.clues);
     }
 
     // Phase 8 Anomalies, Fog & Crown
     if (snapshot.anomalies) {
       this.renderAnomalyOverlay(snapshot.anomalies);
+      this.renderActiveEffectsTray(snapshot.anomalies);
       this.renderFogOfWar(snapshot.anomalies.fog);
       this.renderGoldenCrown(snapshot.anomalies.crown);
     } else {
       this.anomalyContainer.removeAll(true);
+      this.effectsTrayContainer.removeAll(true);
       this.fogGraphics.clear();
       this.crownContainer.removeAll(true);
     }
