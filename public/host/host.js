@@ -460,8 +460,14 @@ class HostScene extends Phaser.Scene {
     this.arenaContainer = this.add.container(0, 0);
     this.debugContainer = this.add.container(20, 20);
 
-    // Set depths
+    // Set explicit layer depths (Background -> Map -> Walls -> Labels -> Loot -> Sentinels -> Players [35] -> FX [40] -> UI)
+    this.bgGraphics.setDepth(1);
+    this.mapGraphics.setDepth(2);
+    this.wallsGraphics.setDepth(3);
+    this.labelsContainer.setDepth(4);
+    this.interactablesGraphics.setDepth(15);
     this.sentinelsGraphics.setDepth(25);
+    this.fxContainer.setDepth(40);
     this.fogGraphics.setDepth(48);
     this.crownContainer.setDepth(52);
     this.cluesPanelContainer.setDepth(55);
@@ -2492,9 +2498,11 @@ class HostScene extends Phaser.Scene {
 
   createPlayerEntity(p) {
     const ox = ARENA_OFFSET_X;
-    const container = this.add.container((p.x || 800) + ox, p.y || 530);
+    const initialX = typeof p.x === 'number' && !isNaN(p.x) ? p.x : 800;
+    const initialY = typeof p.y === 'number' && !isNaN(p.y) ? p.y : 530;
+    const container = this.add.container(initialX + ox, initialY);
     const radius = 24;
-    const pColorNum = p.color ? p.color.num : (p.colorNum || 0x00f0ff);
+    const pColorNum = p.color ? (p.color.num || 0x00f0ff) : (p.colorNum || 0x00f0ff);
 
     // Glowing Top 3 pulsing aura
     const aura = this.add.graphics();
@@ -2523,7 +2531,7 @@ class HostScene extends Phaser.Scene {
 
     const keyIcon = this.add.text(0, -radius - 30, '🔑', { fontSize: '14px' }).setOrigin(0.5).setVisible(false);
 
-    const nameTag = this.add.text(0, -radius - 14, p.name, {
+    const nameTag = this.add.text(0, -radius - 14, p.name || 'RACER', {
       fontFamily: 'sans-serif',
       fontSize: '14px',
       fontStyle: 'bold',
@@ -2533,7 +2541,7 @@ class HostScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     container.add([aura, glow, ring, circle, core, keyIcon, nameTag]);
-    container.setDepth(10);
+    container.setDepth(35); // Always render above terrain, walls, and interactables
 
     this.playerMap.set(p.id, {
       container,
@@ -2545,14 +2553,14 @@ class HostScene extends Phaser.Scene {
       rank: 99,
       keyIcon,
       labelText: nameTag,
-      targetX: p.x || 800,
-      targetY: p.y || 530,
-      currentX: p.x || 800,
-      currentY: p.y || 530,
-      score: 0,
-      hasKey: false,
+      targetX: initialX,
+      targetY: initialY,
+      currentX: initialX,
+      currentY: initialY,
+      score: p.score || 0,
+      hasKey: Boolean(p.hasKey),
       action: false,
-      color: p.color
+      color: p.color || { num: pColorNum, hex: '#00F0FF' }
     });
   }
 
@@ -2567,11 +2575,25 @@ class HostScene extends Phaser.Scene {
     if (!snapshot) return;
 
     if (snapshot.p) {
+      const activeIds = new Set(snapshot.p.map(p => p.id));
+      for (const [id, entity] of this.playerMap.entries()) {
+        if (!activeIds.has(id)) {
+          entity.container.destroy();
+          this.playerMap.delete(id);
+        }
+      }
+
       for (const snap of snapshot.p) {
-        const entity = this.playerMap.get(snap.id);
+        let entity = this.playerMap.get(snap.id);
+        if (!entity) {
+          this.createPlayerEntity(snap);
+          entity = this.playerMap.get(snap.id);
+        }
         if (entity) {
-          entity.targetX = snap.x;
-          entity.targetY = snap.y;
+          const posX = typeof snap.x === 'number' && !isNaN(snap.x) ? snap.x : entity.targetX;
+          const posY = typeof snap.y === 'number' && !isNaN(snap.y) ? snap.y : entity.targetY;
+          entity.targetX = posX;
+          entity.targetY = posY;
           entity.action = Boolean(snap.a);
           entity.score = snap.score !== undefined ? snap.score : (snap.s || 0);
           entity.hasKey = Boolean(snap.hasKey !== undefined ? snap.hasKey : snap.k);
@@ -2698,6 +2720,11 @@ class HostScene extends Phaser.Scene {
 
     for (const entity of this.playerMap.values()) {
       if (isRunning) {
+        if (isNaN(entity.currentX) || entity.currentX === undefined) entity.currentX = entity.targetX || 800;
+        if (isNaN(entity.currentY) || entity.currentY === undefined) entity.currentY = entity.targetY || 530;
+        if (isNaN(entity.targetX) || entity.targetX === undefined) entity.targetX = entity.currentX;
+        if (isNaN(entity.targetY) || entity.targetY === undefined) entity.targetY = entity.currentY;
+
         const dx = entity.targetX - entity.currentX;
         const dy = entity.targetY - entity.currentY;
         const dist = Math.hypot(dx, dy);
