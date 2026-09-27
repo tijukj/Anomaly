@@ -24,11 +24,23 @@ const io = new Server(server, {
   }
 });
 
-// Serve static vendor and client directories
+// Serve static vendor and client directories (with fresh cache control)
 app.use('/vendor', express.static(path.join(ROOT_DIR, 'public/vendor')));
-app.use('/host', express.static(path.join(ROOT_DIR, 'public/host')));
-app.use('/play', express.static(path.join(ROOT_DIR, 'public/play')));
-app.use('/shared', express.static(path.join(ROOT_DIR, 'public/shared')));
+app.use('/host', express.static(path.join(ROOT_DIR, 'public/host'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+}));
+app.use('/play', express.static(path.join(ROOT_DIR, 'public/play'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+}));
+app.use('/shared', express.static(path.join(ROOT_DIR, 'public/shared'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+}));
+// General public static fallback (resolves /style.css, etc.)
+app.use(express.static(path.join(ROOT_DIR, 'public/play')));
+app.use(express.static(path.join(ROOT_DIR, 'public')));
+
+// Favicon handler
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Redirect root to /host
 app.get('/', (req, res) => {
@@ -179,6 +191,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     gameManager.handleDisconnect(socket.id);
   });
+});
+
+// Process crash guards
+process.on('uncaughtException', (err) => {
+  console.error('[Server Error] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Server Error] Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 // Start listening on 0.0.0.0

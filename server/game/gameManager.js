@@ -568,33 +568,9 @@ export class GameManager {
     };
   }
 
-  // Join Request Gate (Host must approve before player joins/rejoins)
+  // Immediate Player Join (Direct access into lobby/match)
   requestPlayerJoin(socket, { playerId, name }) {
-    const sanitizedName = (name || 'RACER').trim().slice(0, CONFIG.MAX_NAME_LENGTH) || 'RACER';
-    const isRejoin = Boolean(playerId && this.players.has(playerId));
-    const requestId = 'req_' + Math.random().toString(36).substring(2, 9);
-
-    const pendingEntry = {
-      requestId,
-      socketId: socket.id,
-      playerId,
-      name: sanitizedName,
-      isRejoin,
-      timestamp: Date.now()
-    };
-
-    this.pendingJoinRequests.set(requestId, pendingEntry);
-
-    // Notify player controller that they are in the approval queue
-    socket.emit('join_pending', {
-      requestId,
-      name: sanitizedName,
-      message: 'Awaiting host approval on big screen...'
-    });
-
-    // Notify host screen with join request
-    this.broadcastPendingRequests();
-    console.log(`[GameManager] Join request created: ${sanitizedName} (req: ${requestId})`);
+    this.registerOrReconnectPlayer(socket, { playerId, name });
   }
 
   approvePlayerJoin(requestId) {
