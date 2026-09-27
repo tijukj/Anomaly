@@ -92,9 +92,12 @@ export const STATIC_WALLS = [
   { x: 860, y: 240, width: 30, height: 120, type: 'ruins', colorNum: 0xcc7700 },
   { x: 740, y: 320, width: 90, height: 30, type: 'ruins', colorNum: 0xcc7700 },
 
-  // --- CITADEL CASTLE (Fortress Walls with 2 Gates) ---
+  // --- CITADEL CASTLE (Fortress Walls with 2 Gates & Secret Passage Gap) ---
   { x: 1120, y: 80, width: 400, height: 24, type: 'castle', colorNum: 0x3366cc },
-  { x: 1496, y: 80, width: 24, height: 340, type: 'castle', colorNum: 0x3366cc },
+  // East wall North segment (Secret door gap at y: 200-280)
+  { x: 1496, y: 80, width: 24, height: 120, type: 'castle', colorNum: 0x3366cc },
+  // East wall South segment
+  { x: 1496, y: 280, width: 24, height: 144, type: 'castle', colorNum: 0x3366cc },
   // South wall with South Gate gap (Gate at x: 1280-1360)
   { x: 1120, y: 400, width: 160, height: 24, type: 'castle', colorNum: 0x3366cc },
   { x: 1360, y: 400, width: 160, height: 24, type: 'castle', colorNum: 0x3366cc },

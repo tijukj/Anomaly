@@ -1286,9 +1286,22 @@ class HostScene extends Phaser.Scene {
     // North wall
     this.wallsGraphics.fillRect(ox + 1120, 80, 400, 24);
     this.wallsGraphics.strokeRect(ox + 1120, 80, 400, 24);
-    // East wall
-    this.wallsGraphics.fillRect(ox + 1496, 80, 24, 340);
-    this.wallsGraphics.strokeRect(ox + 1496, 80, 24, 340);
+    // East wall segments (North segment & South segment with secret door gap at y: 200-280)
+    this.wallsGraphics.fillRect(ox + 1496, 80, 24, 120);
+    this.wallsGraphics.strokeRect(ox + 1496, 80, 24, 120);
+    this.wallsGraphics.fillRect(ox + 1496, 280, 24, 144);
+    this.wallsGraphics.strokeRect(ox + 1496, 280, 24, 144);
+
+    // Secret Door (Rendered only if closed)
+    if (!currentGameState.secretDoorOpen && !currentGameState.sd) {
+      this.wallsGraphics.fillStyle(0xFF0055, 0.9);
+      this.wallsGraphics.lineStyle(2, 0xFF0055, 1);
+      this.wallsGraphics.fillRect(ox + 1496, 200, 24, 80);
+      this.wallsGraphics.strokeRect(ox + 1496, 200, 24, 80);
+      this.wallsGraphics.fillStyle(0x101030, 1);
+      this.wallsGraphics.lineStyle(2, 0x3377FF, 0.85);
+    }
+
     // South wall segments
     this.wallsGraphics.fillRect(ox + 1120, 400, 160, 24);
     this.wallsGraphics.strokeRect(ox + 1120, 400, 160, 24);
@@ -1299,17 +1312,17 @@ class HostScene extends Phaser.Scene {
     this.wallsGraphics.strokeRect(ox + 1120, 80, 24, 120);
     this.wallsGraphics.fillRect(ox + 1120, 280, 24, 144);
     this.wallsGraphics.strokeRect(ox + 1120, 280, 24, 144);
-    // Keep chamber walls
-    this.wallsGraphics.fillRect(ox + 1250, 170, 120, 18);
-    this.wallsGraphics.strokeRect(ox + 1250, 170, 120, 18);
-    this.wallsGraphics.fillRect(ox + 1250, 170, 18, 120);
-    this.wallsGraphics.strokeRect(ox + 1250, 170, 18, 120);
-    this.wallsGraphics.fillRect(ox + 1352, 170, 18, 120);
-    this.wallsGraphics.strokeRect(ox + 1352, 170, 18, 120);
-    this.wallsGraphics.fillRect(ox + 1250, 272, 40, 18);
-    this.wallsGraphics.strokeRect(ox + 1250, 272, 40, 18);
-    this.wallsGraphics.fillRect(ox + 1330, 272, 40, 18);
-    this.wallsGraphics.strokeRect(ox + 1330, 272, 40, 18);
+    // Keep chamber walls (with 80px doorway)
+    this.wallsGraphics.fillRect(ox + 1240, 170, 140, 18);
+    this.wallsGraphics.strokeRect(ox + 1240, 170, 140, 18);
+    this.wallsGraphics.fillRect(ox + 1240, 170, 18, 120);
+    this.wallsGraphics.strokeRect(ox + 1240, 170, 18, 120);
+    this.wallsGraphics.fillRect(ox + 1362, 170, 18, 120);
+    this.wallsGraphics.strokeRect(ox + 1362, 170, 18, 120);
+    this.wallsGraphics.fillRect(ox + 1240, 272, 30, 18);
+    this.wallsGraphics.strokeRect(ox + 1240, 272, 30, 18);
+    this.wallsGraphics.fillRect(ox + 1350, 272, 30, 18);
+    this.wallsGraphics.strokeRect(ox + 1350, 272, 30, 18);
 
     // Cave Labyrinth Walls
     this.wallsGraphics.lineStyle(2, 0xCC00FF, 0.75);
@@ -1682,39 +1695,165 @@ class HostScene extends Phaser.Scene {
     });
   }
 
-  // Render Big Center Pre-Match Countdown (5s)
+  // Render Big Center Pre-Match Countdown (5s) with Quick Rules & Scoring Guide
   renderCountdown(count) {
     this.countdownContainer.removeAll(true);
     if (currentGameState.state !== 'COUNTDOWN') return;
 
     const bg = this.add.graphics();
-    bg.fillStyle(0x050512, 0.75);
+    bg.fillStyle(0x050512, 0.94);
     bg.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.countdownContainer.add(bg);
 
-    const countText = this.add.text(1100, WORLD_HEIGHT / 2 - 20, count > 0 ? `${count}` : 'RACE!', {
+    // Header Title & Countdown Circle
+    const cx = WORLD_WIDTH / 2;
+    const countBox = this.add.graphics();
+    const countColor = count <= 2 ? 0xFF0055 : (count <= 3 ? 0xFFAA00 : 0x00F0FF);
+    countBox.fillStyle(0x0c0c24, 0.95);
+    countBox.fillRoundedRect(cx - 320, 25, 640, 95, 16);
+    countBox.lineStyle(3, countColor, 0.95);
+    countBox.strokeRoundedRect(cx - 320, 25, 640, 95, 16);
+    this.countdownContainer.add(countBox);
+
+    const titleText = this.add.text(cx - 60, 52, 'MATCH LAUNCHING IN', {
       fontFamily: '"Impact", "Arial Black", sans-serif',
-      fontSize: count > 0 ? '140px' : '100px',
-      color: count > 0 ? '#00F0FF' : '#39FF14',
-      stroke: '#FFFFFF',
+      fontSize: '24px',
+      color: '#FFFFFF',
+      letterSpacing: 3
+    }).setOrigin(0.5);
+
+    const countNum = this.add.text(cx + 170, 72, count > 0 ? `${count}` : 'GO!', {
+      fontFamily: '"Impact", "Arial Black", sans-serif',
+      fontSize: count > 0 ? '58px' : '44px',
+      color: count > 0 ? (count <= 2 ? '#FF0055' : (count <= 3 ? '#FFAA00' : '#00F0FF')) : '#39FF14',
+      stroke: '#000000',
       strokeThickness: 4
     }).setOrigin(0.5);
 
-    const sub = this.add.text(1100, WORLD_HEIGHT / 2 + 80, 'GET READY RACERS - PREPARE YOUR PHONES', {
+    const subTitle = this.add.text(cx - 60, 85, 'READ FIELD MANUAL • PREPARE PHONE CONTROLLER', {
       fontFamily: 'sans-serif',
-      fontSize: '18px',
+      fontSize: '11px',
       fontStyle: 'bold',
-      color: '#FFFFFF',
-      letterSpacing: 4
+      color: '#8888BB',
+      letterSpacing: 2
     }).setOrigin(0.5);
 
-    this.countdownContainer.add([countText, sub]);
+    this.countdownContainer.add([titleText, countNum, subTitle]);
+
+    // 4 Instructions & Scoring Cards
+    const cards = [
+      {
+        icon: '🕹️',
+        title: 'CONTROLS & MAP',
+        colorHex: '#00F0FF',
+        colorNum: 0x00f0ff,
+        items: [
+          '• STEER: Touch & drag joystick on phone',
+          '• ACTION: Tap glowing button when near targets',
+          '• 6 REGIONS: Forest, Ruins, Castle, Cave, Plaza',
+          '• CYBER RIVER: Slows speed unless on Bridges'
+        ]
+      },
+      {
+        icon: '💎',
+        title: 'SCORING & LOOT',
+        colorHex: '#39FF14',
+        colorNum: 0x39ff14,
+        items: [
+          '• COMMON (Cyan): +5 pts (quick collect)',
+          '• RARE (Yellow): +15 pts',
+          '• EPIC (Pink): +30 pts',
+          '• GLITCH (Magenta): +40 pts (10s lifespan)',
+          '• EXPLORATION: +10 pts first visit per region'
+        ]
+      },
+      {
+        icon: '📦',
+        title: 'CHESTS & VAULTS',
+        colorHex: '#FFAA00',
+        colorNum: 0xffaa00,
+        items: [
+          '• CHESTS: Hold ACTION for 1.0s (+10 to +35 pts)',
+          '• VAULTS: Find Keys to open Vaults (+50 pts)',
+          '• MERCHANTS: Trade for points (+5 to +25 pts)',
+          '• MISSIONS: Complete dynamic tasks (+20 to +50 pts)'
+        ]
+      },
+      {
+        icon: '⚡',
+        title: 'HAZARDS & THE HUNT',
+        colorHex: '#FF0055',
+        colorNum: 0xff0055,
+        items: [
+          '• DRONES: Avoid red hazard sentinels (-10 pts!)',
+          '• ANOMALIES: Speed Surge, Teleport & Fog events',
+          '• CROWN: Hold crown for bonus (+5 pts every 2s)',
+          '• THE HUNT: Crack 3 clues for +150p Legendary!'
+        ]
+      }
+    ];
+
+    const cardW = 390;
+    const cardH = 380;
+    const startX = cx - (1.5 * (cardW + 24));
+    const cardY = 340;
+
+    cards.forEach((c, idx) => {
+      const cardX = startX + idx * (cardW + 24);
+
+      const cBg = this.add.graphics();
+      cBg.fillStyle(0x0c0c22, 0.95);
+      cBg.fillRoundedRect(cardX - cardW / 2, cardY - cardH / 2, cardW, cardH, 14);
+      cBg.lineStyle(2, c.colorNum, 0.85);
+      cBg.strokeRoundedRect(cardX - cardW / 2, cardY - cardH / 2, cardW, cardH, 14);
+      this.countdownContainer.add(cBg);
+
+      // Card Header
+      const icon = this.add.text(cardX - cardW / 2 + 30, cardY - cardH / 2 + 32, c.icon, { fontSize: '26px' }).setOrigin(0.5);
+      const title = this.add.text(cardX - cardW / 2 + 58, cardY - cardH / 2 + 32, c.title, {
+        fontFamily: '"Impact", "Arial Black", sans-serif',
+        fontSize: '17px',
+        color: c.colorHex,
+        letterSpacing: 2
+      }).setOrigin(0, 0.5);
+
+      const divLine = this.add.graphics();
+      divLine.lineStyle(1, c.colorNum, 0.4);
+      divLine.lineBetween(cardX - cardW / 2 + 20, cardY - cardH / 2 + 58, cardX + cardW / 2 - 20, cardY - cardH / 2 + 58);
+
+      this.countdownContainer.add([icon, title, divLine]);
+
+      // Bullet Points
+      c.items.forEach((item, itemIdx) => {
+        const itemText = this.add.text(cardX - cardW / 2 + 24, cardY - cardH / 2 + 82 + itemIdx * 62, item, {
+          fontFamily: 'sans-serif',
+          fontSize: '13px',
+          fontStyle: 'bold',
+          color: '#E0E0FF',
+          lineSpacing: 4,
+          wordWrap: { width: cardW - 48 }
+        });
+        this.countdownContainer.add(itemText);
+      });
+    });
+
+    // Bottom Tips Bar
+    const footerText = this.add.text(cx, WORLD_HEIGHT - 60, '👑 HIGHEST SCORE AFTER 10 MINUTES WINS • KEEP MOVING & WATCH LIVE LEADERBOARD', {
+      fontFamily: 'sans-serif',
+      fontSize: '14px',
+      fontStyle: 'bold',
+      color: '#FFE600',
+      letterSpacing: 2
+    }).setOrigin(0.5);
+    this.countdownContainer.add(footerText);
+
+    this.countdownContainer.setDepth(200);
 
     this.tweens.add({
-      targets: countText,
-      scaleX: 1.3,
-      scaleY: 1.3,
-      duration: 350,
+      targets: countNum,
+      scaleX: 1.25,
+      scaleY: 1.25,
+      duration: 300,
       yoyo: true,
       ease: 'Quad.easeInOut'
     });
