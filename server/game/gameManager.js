@@ -137,16 +137,24 @@ export class GameManager {
 
       const activePlayerList = Array.from(this.players.values()).filter(p => p.connected);
 
-      // 2. Authoritative physics & collisions
+      // 2. Authoritative physics & collisions (Double-pass resolution + anti-stuck safety net)
       for (const player of activePlayerList) {
         this.updatePlayerMovement(player, dt);
       }
 
       for (const player of activePlayerList) {
         this.resolveWallCollisions(player);
+        this.clampPlayerToBounds(player);
       }
 
       this.resolvePlayerCollisions(activePlayerList);
+
+      for (const player of activePlayerList) {
+        this.resolveWallCollisions(player);
+        this.clampPlayerToBounds(player);
+      }
+
+      this.checkAndResolveStuckPlayers(activePlayerList, dt);
       this.checkRegionDiscoveries(activePlayerList);
 
       // 3. Clues & Timeline Triggers
@@ -393,10 +401,14 @@ export class GameManager {
       this.statsTracker.recordMovement(player, player.x - prevX, player.y - prevY);
     }
 
-    // World Boundary Hard Clamping
-    const r = CONFIG.PHYSICS.PLAYER_RADIUS;
-    player.x = Math.max(r + 20, Math.min(CONFIG.WORLD.WIDTH - r - 20, player.x));
-    player.y = Math.max(r + 20, Math.min(CONFIG.WORLD.HEIGHT - r - 20, player.y));
+    // World Boundary Initial Clamping
+    this.clampPlayerToBounds(player);
+  }
+
+  clampPlayerToBounds(player) {
+    const bounds = (CONFIG.PHYSICS && CONFIG.PHYSICS.BOUNDS) || { MIN_X: 62, MAX_X: 1538, MIN_Y: 62, MAX_Y: 938 };
+    player.x = Math.max(bounds.MIN_X, Math.min(bounds.MAX_X, player.x));
+    player.y = Math.max(bounds.MIN_Y, Math.min(bounds.MAX_Y, player.y));
   }
 
   resolveWallCollisions(player) {
@@ -444,7 +456,8 @@ export class GameManager {
   resolvePlayerCollisions(playerList) {
     const r = CONFIG.PHYSICS.PLAYER_RADIUS;
     const minDist = r * 2;
-    const pushFactor = CONFIG.PHYSICS.PLAYER_PUSH_FORCE;
+    const pushFactor = (CONFIG.PHYSICS && CONFIG.PHYSICS.PLAYER_PUSH_FORCE) || 0.35;
+    const maxPush = (CONFIG.PHYSICS && CONFIG.PHYSICS.MAX_PUSH_PER_TICK) || 5.0;
 
     for (let i = 0; i < playerList.length; i++) {
       for (let j = i + 1; j < playerList.length; j++) {
@@ -457,7 +470,8 @@ export class GameManager {
 
         if (distSq < minDist * minDist && distSq > 0.0001) {
           const dist = Math.sqrt(distSq);
-          const overlap = (minDist - dist) * pushFactor * 0.5;
+          const rawOverlap = (minDist - dist) * pushFactor * 0.5;
+          const overlap = Math.min(maxPush, rawOverlap);
           const nx = dx / dist;
           const ny = dy / dist;
 
@@ -465,6 +479,53 @@ export class GameManager {
           p1.y -= ny * overlap;
           p2.x += nx * overlap;
           p2.y += ny * overlap;
+        }
+      }
+    }
+  }
+
+  checkAndResolveStuckPlayers(playerList, dt) {
+    const thresholdSec = (CONFIG.PHYSICS && CONFIG.PHYSICS.ANTI_STUCK_THRESHOLD_SEC) || 2.0;
+    const nudgeDist = (CONFIG.PHYSICS && CONFIG.PHYSICS.ANTI_STUCK_NUDGE_DIST) || 45;
+
+    for (const player of playerList) {
+      const inputMag = Math.hypot(player.input.x || 0, player.input.y || 0);
+
+      if (inputMag > 0.15) {
+        if (!player._stuckTracker) {
+          player._stuckTracker = { lastX: player.x, lastY: player.y, stuckTime: 0 };
+        }
+        const moved = Math.hypot(player.x - player._stuckTracker.lastX, player.y - player._stuckTracker.lastY);
+
+        if (moved < 1.5) {
+          player._stuckTracker.stuckTime += dt;
+          if (player._stuckTracker.stuckTime >= thresholdSec) {
+            // Player is stuck trying to move: gently nudge towards center/plaza
+            const toPlazaX = 800 - player.x;
+            const toPlazaY = 530 - player.y;
+            const dist = Math.hypot(toPlazaX, toPlazaY) || 1;
+            const dirX = toPlazaX / dist;
+            const dirY = toPlazaY / dist;
+
+            player.x += dirX * nudgeDist;
+            player.y += dirY * nudgeDist;
+            player.vx = dirX * 60;
+            player.vy = dirY * 60;
+            player._stuckTracker.stuckTime = 0;
+            player._stuckTracker.lastX = player.x;
+            player._stuckTracker.lastY = player.y;
+            console.log(`[Physics] 🚀 Anti-stuck safety net triggered for ${player.name} at (${Math.round(player.x)}, ${Math.round(player.y)})`);
+          }
+        } else {
+          player._stuckTracker.lastX = player.x;
+          player._stuckTracker.lastY = player.y;
+          player._stuckTracker.stuckTime = 0;
+        }
+      } else {
+        if (player._stuckTracker) {
+          player._stuckTracker.stuckTime = 0;
+          player._stuckTracker.lastX = player.x;
+          player._stuckTracker.lastY = player.y;
         }
       }
     }

@@ -55,8 +55,8 @@ class SimulatedBot {
       console.log(`[Bot ${this.index + 1}] Joined successfully! Assigned color: ${data.player.color.name}`);
     });
 
-    // Track world state from snapshot
-    this.socket.on('tick_snapshot', (snapshot) => {
+    // Track world state from authoritative snapshot
+    this.socket.on('snapshot', (snapshot) => {
       if (!snapshot) return;
 
       // Update my position
@@ -69,8 +69,8 @@ class SimulatedBot {
       }
 
       // Update active interactables list
-      if (snapshot.ent) {
-        this.activeInteractables = snapshot.ent.filter(e => e.state === 'active');
+      if (snapshot.e) {
+        this.activeInteractables = snapshot.e.filter(e => e.state === 'active' || e.state === 'revealed');
       }
     });
 
@@ -84,9 +84,25 @@ class SimulatedBot {
   updateAI() {
     const now = Date.now();
 
+    // Perimeter repulsion (steer inwards if nearing boundaries)
+    const margin = 100;
+    let repelX = 0;
+    let repelY = 0;
+    if (this.myPos.x < margin) repelX = 1;
+    else if (this.myPos.x > 1600 - margin) repelX = -1;
+    if (this.myPos.y < margin) repelY = 1;
+    else if (this.myPos.y > 1000 - margin) repelY = -1;
+
+    if (repelX !== 0 || repelY !== 0) {
+      this.currentInput.x = repelX;
+      this.currentInput.y = repelY;
+      this.currentInput.action = false;
+      return;
+    }
+
     // 1. Find nearest active interactable
     let nearestTarget = null;
-    let nearestDist = 450; // Search vision radius
+    let nearestDist = 550; // Search vision radius
 
     for (const ent of this.activeInteractables) {
       const dist = Math.hypot(ent.x - this.myPos.x, ent.y - this.myPos.y);
@@ -103,22 +119,22 @@ class SimulatedBot {
       this.currentInput.y = Math.sin(angle);
 
       // In interaction range? Trigger action!
-      if (nearestDist <= (nearestTarget.radius || 40) + 15) {
-        this.actionEndTime = now + 250;
+      if (nearestDist <= (nearestTarget.radius || 35) + 20) {
+        this.actionEndTime = now + 400;
       }
     } else {
       // 2. Fallback: Organic wandering
       if (now >= this.nextWanderTime) {
-        this.isPaused = Math.random() < 0.15;
+        this.isPaused = Math.random() < 0.1;
         this.targetAngle = Math.random() * Math.PI * 2;
-        this.nextWanderTime = now + 1200 + Math.random() * 2000;
+        this.nextWanderTime = now + 1500 + Math.random() * 2000;
       }
 
       if (this.isPaused) {
         this.currentInput.x = 0;
         this.currentInput.y = 0;
       } else {
-        this.targetAngle += (Math.random() - 0.5) * 0.1;
+        this.targetAngle += (Math.random() - 0.5) * 0.15;
         this.currentInput.x = Math.cos(this.targetAngle) * this.speedFactor;
         this.currentInput.y = Math.sin(this.targetAngle) * this.speedFactor;
       }

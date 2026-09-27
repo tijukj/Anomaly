@@ -101,12 +101,12 @@ export const STATIC_WALLS = [
   // West wall with West Gate gap (Gate at y: 200-280)
   { x: 1120, y: 80, width: 24, height: 120, type: 'castle', colorNum: 0x3366cc },
   { x: 1120, y: 280, width: 24, height: 144, type: 'castle', colorNum: 0x3366cc },
-  // Castle Keep inner chamber walls (North, West, East, South with 40px entrance at 1290-1330)
-  { x: 1250, y: 170, width: 120, height: 18, type: 'castle', colorNum: 0x4488ff },
-  { x: 1250, y: 170, width: 18, height: 120, type: 'castle', colorNum: 0x4488ff },
-  { x: 1352, y: 170, width: 18, height: 120, type: 'castle', colorNum: 0x4488ff },
-  { x: 1250, y: 272, width: 40, height: 18, type: 'castle', colorNum: 0x4488ff },
-  { x: 1330, y: 272, width: 40, height: 18, type: 'castle', colorNum: 0x4488ff },
+  // Castle Keep inner chamber walls (North, West, East, South with 80px entrance at 1270-1350)
+  { x: 1240, y: 170, width: 140, height: 18, type: 'castle', colorNum: 0x4488ff },
+  { x: 1240, y: 170, width: 18, height: 120, type: 'castle', colorNum: 0x4488ff },
+  { x: 1362, y: 170, width: 18, height: 120, type: 'castle', colorNum: 0x4488ff },
+  { x: 1240, y: 272, width: 30, height: 18, type: 'castle', colorNum: 0x4488ff },
+  { x: 1350, y: 272, width: 30, height: 18, type: 'castle', colorNum: 0x4488ff },
 
   // --- OBSIDIAN CAVE (Labyrinth Walls & Choke Points) ---
   { x: 1120, y: 640, width: 28, height: 220, type: 'cave', colorNum: 0x9900cc },
